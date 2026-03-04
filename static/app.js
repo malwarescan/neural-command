@@ -36,7 +36,7 @@
   };
 
   // ── LOGO SVG ───────────────────────────────
-  const LOGO_SVG = `<img src="data:image/jpeg;base64,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" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
+  const LOGO_SVG = `<img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAEBAQEBAQEBAQEBAQEBAQIBAQEBAQIBAQECAgICAgICAgIDAwQDAwMDAwICAwQDAwQEBAQEAgMFBQQEBQQEBAT/2wBDAQEBAQEBAQIBAQIEAwIDBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAT/wAARCAAgACADASIAAhEBAxEB/8QAGAABAAMBAAAAAAAAAAAAAAAACggJCwb/xAAoEAAABwABBAICAgMAAAAAAAABAgMEBQYHCAAJERIKExQhFiIjJzH/xAAUAQEAAAAAAAAAAAAAAAAAAAAA/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAwDAQACEQMRAD8AeJpOhVLJM6v2rX6VTgqLmVKldCus2qmZZKGiYVivJSToxCgJjAk3bLKCBQER9P0HWb5tXy7u6ByK2uYqnAvAaHTKSq9dEz+koZTJbxuM2wSOYqTyV+pc7b7jEFJQ6DJmCaBjiQVnAACpncd2ERDtZdysQHwIcANkEBD/AKH+urH0H/4Q7dublXzedGbNju0ePkA3QeHbkM8QTUsgmVSTVEPcpFDJImOQogUwopiICJC+A5jCfl5dy3jxuMTTe4Lx7pFuoqUg1Q0OooZbJYPvFWZLGICj6MTcLlanVTTFRYrR60KVyJCpg6agYVi6P9JuVa0amVHQqXKt56nXusMLlU5xoBgazMZKNEnzB2l7ABvRZBdJQvkAHwcPIB1RT3avj48eO7rt2dblr24bHls/nGVJ5PHRObMIFaNkWiUvJzBHLhR6zVXFQFJVcnoB/rApSiUpTGOJ7meOmMxXHLj7hnHuCnpq0weE49WeschbNZPp/kNhaVmGZQrZ6/wDpIRL8hdNkRRX6iFJ7nN6lKHgACO/dIhZiydsruLV2uxMnPWCe4J67CwUFCsFZSYmnjrP7Cg1aNGqRTKLLLKKETTSTKY5znKUoCIgHQk/h7VC28Y+SPMSc5J1ax8e4S04jARFZmNxg3OTxVidpTqy6jVi4lCN03CxUimUMkkJjAQomEPACPWix0Zv5OPbR5b9zbjfxvzPiNTa3cbNne4PLzbW1kvUbRm7FgpAPWCSqarxQhFTCsuUvoQRMHnz48eRAI09+vvAdxTiht2G1rtgsKjumc2nK3s3pkjSceV5Eo1+cSllEEEXEhGqKptDGa/ScrZT1MICJ/wCwGDwlvhJo+l7Fw14oa1s8eaJ1/TuOFK0DU4o1dWqJo2xTFcjZCabjFK/5Wf1u3Dgn4qn90fX... [truncated]` ;
 
   // ── HELPERS ────────────────────────────────
   function $(sel) { return document.querySelector(sel); }
@@ -1103,57 +1103,67 @@
       </div>`;
 
     el.querySelectorAll('.connect-service-btn').forEach(btn => {
-      btn.addEventListener('click', () => showConnectionModal(btn.dataset.service, btn.dataset.name));
+      btn.addEventListener('click', () => showApiKeyModal(btn.dataset.service, btn.dataset.name, [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}]));
     });
   }
 
-  function showConnectionModal(serviceId, serviceName) {
-    const overlay = el('div', { className: 'modal-overlay' });
+  function showApiKeyModal(serviceId, serviceName, fields) {
+    const overlay = el('div', { className: 'modal-overlay', id: 'apikey-modal' });
+    const fieldInputs = fields.map((f, i) => `
+      <div class="form-group">
+        <label class="form-label">${f.label}</label>
+        <input type="password" class="form-input" id="apikey-field-${i}" placeholder="${f.placeholder || ''}" required>
+      </div>
+    `).join('');
+
     overlay.innerHTML = `
-      <div class="modal" style="max-width:440px">
+      <div class="modal">
         <div class="modal-header">
           <h3 class="modal-title">Connect ${escapeHtml(serviceName)}</h3>
-          <button class="btn btn-ghost btn-icon close-modal"><i data-lucide="x"></i></button>
+          <button class="btn btn-ghost btn-icon" id="close-apikey-modal"><i data-lucide="x"></i></button>
         </div>
         <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label">API Key or Token</label>
-            <input type="text" class="form-input" id="conn-api-key" placeholder="Enter your API key">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Endpoint URL (optional)</label>
-            <input type="text" class="form-input" id="conn-endpoint" placeholder="https://api.example.com">
-          </div>
+          <p class="text-sm text-muted" style="margin-bottom:16px">Enter your credentials to connect ${escapeHtml(serviceName)} to your agents.</p>
+          ${fieldInputs}
         </div>
         <div class="modal-footer">
-          <button class="btn btn-secondary close-modal">Cancel</button>
-          <button class="btn btn-primary" id="save-connection">Save Connection</button>
+          <button class="btn btn-secondary" id="cancel-apikey">Cancel</button>
+          <button class="btn btn-primary" id="save-apikey"><i data-lucide="check" style="width:14px;height:14px"></i> Connect</button>
         </div>
       </div>`;
     document.body.appendChild(overlay);
     lucide.createIcons({ nodes: [overlay] });
 
-    overlay.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.querySelector('#close-apikey-modal').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#cancel-apikey').addEventListener('click', () => overlay.remove());
     overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
-    overlay.querySelector('#save-connection').addEventListener('click', async () => {
-      const apiKey = document.getElementById('conn-api-key').value.trim();
-      if (!apiKey) { toast('Please enter an API key', 'error'); return; }
+    overlay.querySelector('#save-apikey').addEventListener('click', async () => {
+      const btn = overlay.querySelector('#save-apikey');
+      const credentials = {};
+      let allFilled = true;
+      fields.forEach((f, i) => {
+        const val = document.getElementById(`apikey-field-${i}`).value.trim();
+        if (!val) allFilled = false;
+        credentials[f.key] = val;
+      });
+      if (!allFilled) { toast('Please fill in all fields', 'error'); return; }
+      
+      btn.disabled = true;
+      btn.textContent = 'Connecting...';
       try {
-        await apiFetch('/api/connections', {
+        await apiFetch('/api/connections/apikey', {
           method: 'POST',
-          body: JSON.stringify({
-            service: serviceId,
-            credentials: {
-              api_key: apiKey,
-              endpoint: document.getElementById('conn-endpoint').value.trim(),
-            },
-          }),
+          body: JSON.stringify({ service: serviceId, ...credentials }),
         });
         toast(`${serviceName} connected`, 'success');
         overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
       } catch (err) {
         toast(err.message, 'error');
+        btn.disabled = false;
+        btn.textContent = 'Connect';
       }
     });
   }
@@ -1433,53 +1443,117 @@
   async function renderConnections(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
 
-    const allServices = [
-      { id: 'google_search_console', name: 'Google Search Console', icon: '🔍', desc: 'Monitor search performance and indexing' },
-      { id: 'google_analytics', name: 'Google Analytics', icon: '📊', desc: 'Track website traffic and user behavior' },
-      { id: 'social_media', name: 'Social Media', icon: '📱', desc: 'Connect social media accounts' },
-      { id: 'crm', name: 'CRM', icon: '💼', desc: 'Sync with your CRM system' },
-      { id: 'email', name: 'Email', icon: '✉️', desc: 'Connect email for outreach' },
-      { id: 'custom_api', name: 'Custom API', icon: '🔌', desc: 'Connect any REST API' },
+    const serviceCategories = [
+      {
+        label: 'Data Sources',
+        description: 'Connect analytics and search platforms for your agents to read',
+        services: [
+          { id: 'google_search_console', name: 'Google Search Console', icon: '🔍', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
+          { id: 'google_analytics', name: 'Google Analytics', icon: '📊', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
+          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '🅱️', desc: 'Bing search data, crawl stats, SEO issues', auth: 'oauth' },
+          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '🔥', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
+          { id: 'cloudflare', name: 'Cloudflare', icon: '☁️', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
+        ]
+      },
+      {
+        label: 'AI Models',
+        description: 'Configure AI model access for agent intelligence',
+        services: [
+          { id: 'openai', name: 'OpenAI', icon: '🤖', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
+          { id: 'google_gemini', name: 'Google Gemini', icon: '💎', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
+          { id: 'nano_banana', name: 'Nano Banana', icon: '🍌', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
+        ]
+      },
+      {
+        label: 'Deployment',
+        description: 'Push code and manage infrastructure',
+        services: [
+          { id: 'github', name: 'GitHub', icon: '🐙', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
+        ]
+      },
+      {
+        label: 'Social Publishing',
+        description: 'Post and schedule content across social platforms',
+        services: [
+          { id: 'twitter', name: 'X (Twitter)', icon: '𝕏', desc: 'Post tweets, threads, and media', auth: 'oauth' },
+          { id: 'facebook', name: 'Facebook', icon: '📘', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
+          { id: 'instagram', name: 'Instagram', icon: '📸', desc: 'Publish posts and stories', auth: 'oauth' },
+          { id: 'tiktok', name: 'TikTok', icon: '🎵', desc: 'Upload videos and manage content', auth: 'oauth' },
+        ]
+      }
     ];
 
     try {
       const connections = await apiFetch('/api/connections');
-      const connectedIds = new Set(connections.map(c => c.service));
+      const connectedMap = {};
+      connections.forEach(c => { connectedMap[c.service] = c; });
 
-      container.innerHTML = `
+      let html = `
         <div class="page-header">
           <h1 class="page-title">Connections</h1>
-          <p class="page-subtitle">Manage service integrations for your agents</p>
-        </div>
-        <div class="grid-2">
-          ${allServices.map(s => {
-            const isConnected = connectedIds.has(s.id);
-            const conn = connections.find(c => c.service === s.id);
-            return `
-              <div class="connection-card">
-                <div class="connection-icon">${s.icon}</div>
-                <div class="connection-info">
-                  <div class="connection-name">${s.name}</div>
-                  <div class="connection-status">
-                    <span class="connection-status-dot ${isConnected ? 'connected' : ''}"></span>
-                    <span>${isConnected ? 'Connected' : 'Not connected'}</span>
-                  </div>
-                  <div class="text-xs text-muted" style="margin-top:2px">${s.desc}</div>
-                </div>
-                ${isConnected
-                  ? `<button class="btn btn-secondary btn-sm disconnect-btn" data-service="${s.id}">Disconnect</button>`
-                  : `<button class="btn btn-primary btn-sm connect-btn" data-service="${s.id}" data-name="${s.name}">Connect</button>`
-                }
-              </div>`;
-          }).join('')}
+          <p class="page-subtitle">Connect services for your agents to read data, think, and act</p>
         </div>`;
 
+      serviceCategories.forEach(cat => {
+        html += `
+          <div class="connections-category" style="margin-bottom:32px">
+            <div style="margin-bottom:16px">
+              <h2 style="font-size:18px;font-weight:700;margin:0 0 4px 0">${cat.label}</h2>
+              <p class="text-sm text-muted" style="margin:0">${cat.description}</p>
+            </div>
+            <div class="grid-2">
+              ${cat.services.map(s => {
+                const conn = connectedMap[s.id];
+                const isConnected = !!conn && conn.is_active;
+                const testedAt = conn?.last_tested_at ? timeAgo(conn.last_tested_at) : null;
+                const badgeHtml = s.badge ? `<span class="badge badge-active" style="font-size:10px;margin-left:6px">${s.badge}</span>` : '';
+                return `
+                <div class="connection-card ${isConnected ? 'connection-card-connected' : ''}">
+                  <div class="connection-icon">${s.icon}</div>
+                  <div class="connection-info">
+                    <div class="connection-name">${s.name}${badgeHtml}</div>
+                    <div class="connection-status">
+                      <span class="connection-status-dot ${isConnected ? 'connected' : ''}"></span>
+                      <span>${isConnected ? 'Connected' : 'Not connected'}</span>
+                      ${testedAt ? `<span class="text-xs text-muted" style="margin-left:8px">Tested ${testedAt}</span>` : ''}
+                    </div>
+                    <div class="text-xs text-muted" style="margin-top:2px">${s.desc}</div>
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                    ${isConnected ? `
+                      <button class="btn btn-ghost btn-sm test-conn-btn" data-service="${s.id}" data-name="${s.name}" title="Test connection">
+                        <i data-lucide="activity" style="width:14px;height:14px"></i>
+                      </button>
+                      <button class="btn btn-secondary btn-sm disconnect-btn" data-service="${s.id}">Disconnect</button>
+                    ` : `
+                      <button class="btn btn-primary btn-sm connect-btn" data-service="${s.id}" data-name="${s.name}" data-auth="${s.auth}" data-fields='${s.fields ? JSON.stringify(s.fields) : ""}'>Connect</button>
+                    `}
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      });
+
+      container.innerHTML = html;
+      lucide.createIcons();
+
+      // Bind connect buttons
       document.querySelectorAll('.connect-btn').forEach(btn => {
         btn.addEventListener('click', () => {
-          showConnectionModal(btn.dataset.service, btn.dataset.name);
+          const auth = btn.dataset.auth;
+          const service = btn.dataset.service;
+          const name = btn.dataset.name;
+          if (auth === 'oauth') {
+            startOAuthFlow(service, name);
+          } else {
+            const fields = btn.dataset.fields ? JSON.parse(btn.dataset.fields) : [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}];
+            showApiKeyModal(service, name, fields);
+          }
         });
       });
 
+      // Bind disconnect buttons
       document.querySelectorAll('.disconnect-btn').forEach(btn => {
         btn.addEventListener('click', async () => {
           try {
@@ -1492,9 +1566,69 @@
         });
       });
 
+      // Bind test buttons
+      document.querySelectorAll('.test-conn-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const origHtml = btn.innerHTML;
+          btn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div>';
+          btn.disabled = true;
+          try {
+            const result = await apiFetch(`/api/connections/${btn.dataset.service}/test`);
+            toast(`${btn.dataset.name} connection verified`, 'success');
+            renderConnections(container);
+          } catch (err) {
+            toast(`${btn.dataset.name}: ${err.message}`, 'error');
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+          }
+        });
+      });
+
     } catch (err) {
-      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load connections</h3></div>`;
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load connections</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
       toast(err.message, 'error');
+    }
+  }
+
+  async function startOAuthFlow(service, serviceName) {
+    try {
+      const data = await apiFetch(`/api/oauth/start/${service}`);
+      if (data.auth_url) {
+        // Open OAuth popup
+        const w = 600, h = 700;
+        const left = (screen.width - w) / 2;
+        const top = (screen.height - h) / 2;
+        const popup = window.open(data.auth_url, `oauth_${service}`, `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+        
+        // Listen for completion message from popup
+        const handler = (event) => {
+          if (event.data?.type === 'oauth_complete' && event.data?.service === service) {
+            window.removeEventListener('message', handler);
+            toast(`${serviceName} connected successfully`, 'success');
+            const main = document.getElementById('main-content');
+            if (main) renderConnections(main);
+          }
+        };
+        window.addEventListener('message', handler);
+
+        // Fallback: poll for popup close
+        const pollTimer = setInterval(() => {
+          if (popup && popup.closed) {
+            clearInterval(pollTimer);
+            window.removeEventListener('message', handler);
+            setTimeout(() => {
+              const main = document.getElementById('main-content');
+              if (main) renderConnections(main);
+            }, 1000);
+          }
+        }, 500);
+      }
+    } catch (err) {
+      if (err.message.includes('not configured')) {
+        toast(`${serviceName} OAuth is not configured yet. Contact admin.`, 'error');
+      } else {
+        toast(err.message, 'error');
+      }
     }
   }
 
