@@ -1171,6 +1171,11 @@
 }
 .connection-status-dot.connected { background: var(--color-success); }
 
+.connection-card-connected {
+  border-color: var(--color-success);
+  background: rgba(16, 185, 129, 0.03);
+}
+
 /* ── RANGE SLIDER ───────────────────────────── */
 .range-group {
   display: flex;
