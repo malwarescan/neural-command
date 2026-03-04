@@ -1240,7 +1240,8 @@
               ${t.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
             </div>
           </div>
-        `).join('')}`;
+        `).join('')}
+      </div>`;
 
     el.querySelectorAll('.template-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -1333,7 +1334,8 @@
             </div>
             <button class="btn btn-secondary btn-sm connect-service-btn" data-service="${s.id}" data-name="${s.name}">Connect</button>
           </div>
-        `).join('')}`;
+        `).join('')}
+      </div>`;
 
     el.querySelectorAll('.connect-service-btn').forEach(btn => {
       btn.addEventListener('click', () => showApiKeyModal(btn.dataset.service, btn.dataset.name, [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}]));
