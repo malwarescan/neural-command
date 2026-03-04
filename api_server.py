@@ -1405,27 +1405,32 @@ async def create_apikey_connection(body: ApiKeyConnectionRequest, user: dict = D
         credentials.update(body.extra_fields)
 
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            upsert_headers = {
-                **sb_headers_service(),
-                "Prefer": "resolution=merge-duplicates,return=representation",
-            }
-            r = await client.post(
-                f"{SUPABASE_URL}/rest/v1/connections",
-                headers=upsert_headers,
-                json={
-                    "user_id": user_id,
-                    "service": body.service,
+        # Use same manual GET → PATCH/POST pattern as create_connection
+        existing = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}", "limit": "1"},
+        )
+        if existing:
+            await sb_patch(
+                "/rest/v1/connections",
+                params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}"},
+                data={
                     "credentials": credentials,
                     "is_active": True,
                     "last_tested_at": now,
-                    "created_at": now,
                     "updated_at": now,
                 },
             )
-            if r.status_code not in (200, 201):
-                logger.error(f"create_apikey_connection failed for {body.service}: {r.status_code} {r.text}")
-                raise HTTPException(status_code=500, detail="Failed to save API key connection")
+        else:
+            await sb_post("/rest/v1/connections", {
+                "user_id": user_id,
+                "service": body.service,
+                "credentials": credentials,
+                "is_active": True,
+                "last_tested_at": now,
+                "created_at": now,
+                "updated_at": now,
+            })
 
         logger.info(f"API key connection saved for service={body.service} user={user_id}")
         return {"status": "connected", "service": body.service}
