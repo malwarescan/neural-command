@@ -1296,13 +1296,34 @@ async def oauth_callback(code: str = None, state: str = None, error: str = None)
         _oauth_states.pop(state, None)
         logger.info(f"OAuth callback complete for service={service} user={user_id}")
 
-    except HTTPException:
+    except HTTPException as he:
         _oauth_states.pop(state, None)
-        raise
+        error_msg = he.detail
+        logger.error(f"oauth_callback HTTPException for {service}: {error_msg}")
+        html = f"""<html><body><script>
+  if (window.opener) {{
+    try {{ window.opener.postMessage({{type: 'oauth_error', error: '{error_msg}'}}, '*'); }} catch(e) {{}}
+  }}
+  window.close();
+  setTimeout(function() {{
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connection Failed</h2><p>{error_msg}</p><p>You can close this window and try again.</p></div>';
+  }}, 500);
+</script></body></html>"""
+        return HTMLResponse(content=html)
     except Exception as e:
         _oauth_states.pop(state, None)
         logger.error(f"oauth_callback error for {service}: {e}")
-        raise HTTPException(status_code=500, detail="OAuth callback processing failed")
+        error_msg = str(e).replace("'", "\\'")
+        html = f"""<html><body><script>
+  if (window.opener) {{
+    try {{ window.opener.postMessage({{type: 'oauth_error', error: 'Connection failed'}}, '*'); }} catch(e) {{}}
+  }}
+  window.close();
+  setTimeout(function() {{
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connection Failed</h2><p>Something went wrong. Please try again.</p></div>';
+  }}, 500);
+</script></body></html>"""
+        return HTMLResponse(content=html)
 
     html = f"""<html><body><script>
   // Signal the parent window via multiple methods
