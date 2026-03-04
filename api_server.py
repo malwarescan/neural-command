@@ -4,9 +4,12 @@ Neural Command — Production API Server
 FastAPI backend connecting to Supabase, OpenAI, and Stripe.
 """
 
+import hashlib
 import logging
 import os
+import secrets
 import time
+import urllib.parse
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -29,6 +32,95 @@ SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
 STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
+
+# OAuth Provider Credentials
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+GOOGLE_CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET", "")
+MICROSOFT_CLIENT_ID = os.getenv("MICROSOFT_CLIENT_ID", "")
+MICROSOFT_CLIENT_SECRET = os.getenv("MICROSOFT_CLIENT_SECRET", "")
+GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID", "")
+GITHUB_CLIENT_SECRET = os.getenv("GITHUB_CLIENT_SECRET", "")
+TWITTER_CLIENT_ID = os.getenv("TWITTER_CLIENT_ID", "")
+TWITTER_CLIENT_SECRET = os.getenv("TWITTER_CLIENT_SECRET", "")
+META_APP_ID = os.getenv("META_APP_ID", "")
+META_APP_SECRET = os.getenv("META_APP_SECRET", "")
+TIKTOK_CLIENT_KEY = os.getenv("TIKTOK_CLIENT_KEY", "")
+TIKTOK_CLIENT_SECRET = os.getenv("TIKTOK_CLIENT_SECRET", "")
+APP_BASE_URL = os.getenv("APP_BASE_URL", "https://agents.croutons.ai")
+
+# ─────────────────────────────────────────────
+# OAuth Service Definitions
+# ─────────────────────────────────────────────
+
+OAUTH_SERVICES = {
+    "google_search_console": {
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "scopes": ["https://www.googleapis.com/auth/webmasters.readonly"],
+        "client_id_var": "GOOGLE_CLIENT_ID",
+        "client_secret_var": "GOOGLE_CLIENT_SECRET",
+    },
+    "google_analytics": {
+        "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
+        "token_url": "https://oauth2.googleapis.com/token",
+        "scopes": ["https://www.googleapis.com/auth/analytics.readonly"],
+        "client_id_var": "GOOGLE_CLIENT_ID",
+        "client_secret_var": "GOOGLE_CLIENT_SECRET",
+    },
+    "bing_webmaster": {
+        "auth_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "scopes": ["https://api.bing.com/webmaster/.default", "offline_access"],
+        "client_id_var": "MICROSOFT_CLIENT_ID",
+        "client_secret_var": "MICROSOFT_CLIENT_SECRET",
+    },
+    "microsoft_clarity": {
+        "auth_url": "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+        "token_url": "https://login.microsoftonline.com/common/oauth2/v2.0/token",
+        "scopes": ["https://graph.microsoft.com/User.Read", "offline_access"],
+        "client_id_var": "MICROSOFT_CLIENT_ID",
+        "client_secret_var": "MICROSOFT_CLIENT_SECRET",
+    },
+    "github": {
+        "auth_url": "https://github.com/login/oauth/authorize",
+        "token_url": "https://github.com/login/oauth/access_token",
+        "scopes": ["repo", "workflow"],
+        "client_id_var": "GITHUB_CLIENT_ID",
+        "client_secret_var": "GITHUB_CLIENT_SECRET",
+    },
+    "twitter": {
+        "auth_url": "https://twitter.com/i/oauth2/authorize",
+        "token_url": "https://api.twitter.com/2/oauth2/token",
+        "scopes": ["tweet.read", "tweet.write", "users.read", "media.write", "offline.access"],
+        "client_id_var": "TWITTER_CLIENT_ID",
+        "client_secret_var": "TWITTER_CLIENT_SECRET",
+        "pkce": True,
+    },
+    "facebook": {
+        "auth_url": "https://www.facebook.com/v19.0/dialog/oauth",
+        "token_url": "https://graph.facebook.com/v19.0/oauth/access_token",
+        "scopes": ["pages_manage_posts", "pages_read_engagement", "pages_show_list"],
+        "client_id_var": "META_APP_ID",
+        "client_secret_var": "META_APP_SECRET",
+    },
+    "instagram": {
+        "auth_url": "https://www.facebook.com/v19.0/dialog/oauth",
+        "token_url": "https://graph.facebook.com/v19.0/oauth/access_token",
+        "scopes": ["instagram_basic", "instagram_content_publish", "pages_show_list"],
+        "client_id_var": "META_APP_ID",
+        "client_secret_var": "META_APP_SECRET",
+    },
+    "tiktok": {
+        "auth_url": "https://www.tiktok.com/v2/auth/authorize",
+        "token_url": "https://open.tiktokapis.com/v2/oauth/token/",
+        "scopes": ["user.info.basic", "video.publish", "video.upload"],
+        "client_id_var": "TIKTOK_CLIENT_KEY",
+        "client_secret_var": "TIKTOK_CLIENT_SECRET",
+    },
+}
+
+# Temporary OAuth state storage (in production, use Redis)
+_oauth_states: dict[str, dict] = {}
 
 # ─────────────────────────────────────────────
 # Logging
@@ -1041,6 +1133,408 @@ async def delete_connection(service: str, user: dict = Depends(get_current_user)
     except Exception as e:
         logger.error(f"delete_connection error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete connection")
+
+
+# ─────────────────────────────────────────────
+# OAUTH ROUTES
+# ─────────────────────────────────────────────
+
+@app.get("/api/oauth/start/{service}")
+async def oauth_start(service: str, user: dict = Depends(get_current_user)):
+    """Begin OAuth flow: generate state and return authorization URL."""
+    if service not in OAUTH_SERVICES:
+        raise HTTPException(status_code=400, detail=f"Unknown service '{service}'")
+
+    svc = OAUTH_SERVICES[service]
+    user_id = user["id"]
+
+    # Generate CSRF state token
+    state = secrets.token_urlsafe(32)
+    state_data: dict = {
+        "user_id": user_id,
+        "service": service,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    # PKCE for Twitter
+    if svc.get("pkce"):
+        code_verifier = secrets.token_urlsafe(64)
+        code_challenge = (
+            hashlib.sha256(code_verifier.encode()).digest()
+        )
+        import base64
+        code_challenge_b64 = (
+            base64.urlsafe_b64encode(code_challenge).rstrip(b"=").decode()
+        )
+        state_data["code_verifier"] = code_verifier
+
+    _oauth_states[state] = state_data
+
+    client_id = globals().get(svc["client_id_var"], os.getenv(svc["client_id_var"], ""))
+    redirect_uri = APP_BASE_URL + "/api/oauth/callback"
+    scope = " ".join(svc["scopes"])
+
+    params: dict = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": scope,
+        "state": state,
+    }
+
+    # Google-specific extras
+    if svc["client_id_var"] == "GOOGLE_CLIENT_ID":
+        params["access_type"] = "offline"
+        params["prompt"] = "consent"
+
+    # Twitter PKCE extras
+    if svc.get("pkce"):
+        params["code_challenge"] = code_challenge_b64
+        params["code_challenge_method"] = "S256"
+
+    auth_url = svc["auth_url"] + "?" + urllib.parse.urlencode(params)
+    logger.info(f"OAuth start for service={service} user={user_id}")
+    return {"auth_url": auth_url, "state": state}
+
+
+@app.get("/api/oauth/callback")
+async def oauth_callback(code: str = None, state: str = None, error: str = None):
+    """Handle OAuth provider redirect. Exchanges code for tokens and stores them."""
+    if error:
+        logger.warning(f"OAuth callback error from provider: {error}")
+        html = f"""<html><body><script>
+  if (window.opener) {{
+    window.opener.postMessage({{type: 'oauth_error', error: '{error}'}}, '*');
+    window.close();
+  }} else {{
+    window.location.href = '/#/connections?error={error}';
+  }}
+</script></body></html>"""
+        return HTMLResponse(content=html)
+
+    if not code or not state:
+        raise HTTPException(status_code=400, detail="Missing code or state parameter")
+
+    state_data = _oauth_states.get(state)
+    if not state_data:
+        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+
+    service = state_data["service"]
+    user_id = state_data["user_id"]
+    svc = OAUTH_SERVICES[service]
+
+    client_id = globals().get(svc["client_id_var"], os.getenv(svc["client_id_var"], ""))
+    client_secret = globals().get(svc["client_secret_var"], os.getenv(svc["client_secret_var"], ""))
+    redirect_uri = APP_BASE_URL + "/api/oauth/callback"
+
+    token_payload: dict = {
+        "grant_type": "authorization_code",
+        "code": code,
+        "redirect_uri": redirect_uri,
+        "client_id": client_id,
+        "client_secret": client_secret,
+    }
+
+    # Twitter PKCE: include code_verifier
+    if svc.get("pkce") and state_data.get("code_verifier"):
+        token_payload["code_verifier"] = state_data["code_verifier"]
+
+    try:
+        headers: dict = {"Content-Type": "application/x-www-form-urlencoded"}
+        if service == "github":
+            headers["Accept"] = "application/json"
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(
+                svc["token_url"],
+                data=token_payload,
+                headers=headers,
+            )
+            if r.status_code not in (200, 201):
+                logger.error(f"OAuth token exchange failed for {service}: {r.status_code} {r.text}")
+                raise HTTPException(status_code=502, detail="Token exchange failed")
+            token_data = r.json()
+
+        credentials = {
+            "access_token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token"),
+            "expires_in": token_data.get("expires_in"),
+            "token_type": token_data.get("token_type"),
+            "scope": token_data.get("scope"),
+        }
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Upsert connection using service_role key
+        async with httpx.AsyncClient(timeout=15) as client:
+            upsert_headers = {
+                **sb_headers_service(),
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            }
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/connections",
+                headers=upsert_headers,
+                json={
+                    "user_id": user_id,
+                    "service": service,
+                    "credentials": credentials,
+                    "is_active": True,
+                    "last_tested_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            if r.status_code not in (200, 201):
+                logger.error(f"Failed to store OAuth tokens for {service}: {r.status_code} {r.text}")
+                raise HTTPException(status_code=500, detail="Failed to store connection")
+
+        # Clean up state
+        _oauth_states.pop(state, None)
+        logger.info(f"OAuth callback complete for service={service} user={user_id}")
+
+    except HTTPException:
+        _oauth_states.pop(state, None)
+        raise
+    except Exception as e:
+        _oauth_states.pop(state, None)
+        logger.error(f"oauth_callback error for {service}: {e}")
+        raise HTTPException(status_code=500, detail="OAuth callback processing failed")
+
+    html = f"""<html><body><script>
+  if (window.opener) {{
+    window.opener.postMessage({{type: 'oauth_complete', service: '{service}'}}, '*');
+    window.close();
+  }} else {{
+    window.location.href = '/#/connections';
+  }}
+</script></body></html>"""
+    return HTMLResponse(content=html)
+
+
+@app.post("/api/oauth/refresh/{service}")
+async def oauth_refresh(service: str, user: dict = Depends(get_current_user)):
+    """Use stored refresh_token to obtain a new access_token."""
+    if service not in OAUTH_SERVICES:
+        raise HTTPException(status_code=400, detail=f"Unknown service '{service}'")
+
+    user_id = user["id"]
+    svc = OAUTH_SERVICES[service]
+
+    try:
+        rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{service}", "limit": "1"},
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No connection found for service '{service}'")
+
+        creds = rows[0].get("credentials", {})
+        refresh_token = creds.get("refresh_token")
+        if not refresh_token:
+            raise HTTPException(status_code=400, detail="No refresh token available for this connection")
+
+        client_id = globals().get(svc["client_id_var"], os.getenv(svc["client_id_var"], ""))
+        client_secret = globals().get(svc["client_secret_var"], os.getenv(svc["client_secret_var"], ""))
+
+        token_payload = {
+            "grant_type": "refresh_token",
+            "refresh_token": refresh_token,
+            "client_id": client_id,
+            "client_secret": client_secret,
+        }
+
+        headers: dict = {"Content-Type": "application/x-www-form-urlencoded"}
+        if service == "github":
+            headers["Accept"] = "application/json"
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            r = await client.post(svc["token_url"], data=token_payload, headers=headers)
+            if r.status_code not in (200, 201):
+                logger.error(f"OAuth refresh failed for {service}: {r.status_code} {r.text}")
+                raise HTTPException(status_code=502, detail="Token refresh failed")
+            token_data = r.json()
+
+        now = datetime.now(timezone.utc).isoformat()
+        updated_creds = {
+            **creds,
+            "access_token": token_data.get("access_token", creds.get("access_token")),
+            "expires_in": token_data.get("expires_in", creds.get("expires_in")),
+        }
+        if token_data.get("refresh_token"):
+            updated_creds["refresh_token"] = token_data["refresh_token"]
+
+        await sb_patch(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{service}"},
+            data={"credentials": updated_creds, "updated_at": now},
+        )
+
+        logger.info(f"OAuth token refreshed for service={service} user={user_id}")
+        return {"status": "refreshed"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"oauth_refresh error for {service}: {e}")
+        raise HTTPException(status_code=500, detail="Token refresh failed")
+
+
+# ─────────────────────────────────────────────
+# API KEY CONNECTIONS
+# ─────────────────────────────────────────────
+
+class ApiKeyConnectionRequest(BaseModel):
+    service: str
+    api_key: Optional[str] = None
+    api_token: Optional[str] = None
+    extra_fields: Optional[dict] = None
+
+
+@app.post("/api/connections/apikey", status_code=201)
+async def create_apikey_connection(body: ApiKeyConnectionRequest, user: dict = Depends(get_current_user)):
+    """Store an API-key-based connection (Cloudflare, OpenAI, Gemini, etc.)."""
+    user_id = user["id"]
+    now = datetime.now(timezone.utc).isoformat()
+
+    credentials: dict = {}
+    if body.api_key:
+        credentials["api_key"] = body.api_key
+    if body.api_token:
+        credentials["api_token"] = body.api_token
+    if body.extra_fields:
+        credentials.update(body.extra_fields)
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            upsert_headers = {
+                **sb_headers_service(),
+                "Prefer": "resolution=merge-duplicates,return=representation",
+            }
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/connections",
+                headers=upsert_headers,
+                json={
+                    "user_id": user_id,
+                    "service": body.service,
+                    "credentials": credentials,
+                    "is_active": True,
+                    "last_tested_at": now,
+                    "created_at": now,
+                    "updated_at": now,
+                },
+            )
+            if r.status_code not in (200, 201):
+                logger.error(f"create_apikey_connection failed for {body.service}: {r.status_code} {r.text}")
+                raise HTTPException(status_code=500, detail="Failed to save API key connection")
+
+        logger.info(f"API key connection saved for service={body.service} user={user_id}")
+        return {"status": "connected", "service": body.service}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_apikey_connection error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save connection")
+
+
+# ─────────────────────────────────────────────
+# CONNECTION TEST
+# ─────────────────────────────────────────────
+
+@app.get("/api/connections/{service}/test")
+async def test_connection(service: str, user: dict = Depends(get_current_user)):
+    """Verify a stored connection by making a lightweight API call."""
+    user_id = user["id"]
+
+    try:
+        rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{service}", "limit": "1"},
+        )
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"No connection found for service '{service}'")
+
+        creds = rows[0].get("credentials", {})
+        access_token = creds.get("access_token") or creds.get("api_key")
+
+        details: dict = {}
+        tested = False
+
+        async with httpx.AsyncClient(timeout=15) as client:
+            if service == "google_search_console":
+                r = await client.get(
+                    "https://www.googleapis.com/webmasters/v3/sites",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                tested = True
+                if r.status_code == 200:
+                    details = r.json()
+                else:
+                    raise HTTPException(status_code=400, detail=f"Google Search Console returned {r.status_code}")
+
+            elif service == "google_analytics":
+                r = await client.get(
+                    "https://analyticsdata.googleapis.com/v1beta/properties",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                tested = True
+                if r.status_code == 200:
+                    details = r.json()
+                else:
+                    raise HTTPException(status_code=400, detail=f"Google Analytics returned {r.status_code}")
+
+            elif service == "github":
+                r = await client.get(
+                    "https://api.github.com/user",
+                    headers={
+                        "Authorization": f"Bearer {access_token}",
+                        "Accept": "application/vnd.github+json",
+                    },
+                )
+                tested = True
+                if r.status_code == 200:
+                    data = r.json()
+                    details = {"login": data.get("login"), "name": data.get("name")}
+                else:
+                    raise HTTPException(status_code=400, detail=f"GitHub returned {r.status_code}")
+
+            elif service == "twitter":
+                r = await client.get(
+                    "https://api.twitter.com/2/users/me",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                tested = True
+                if r.status_code == 200:
+                    details = r.json().get("data", {})
+                else:
+                    raise HTTPException(status_code=400, detail=f"Twitter returned {r.status_code}")
+
+            elif service == "cloudflare":
+                r = await client.get(
+                    "https://api.cloudflare.com/client/v4/user/tokens/verify",
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                tested = True
+                if r.status_code == 200:
+                    details = r.json().get("result", {})
+                else:
+                    raise HTTPException(status_code=400, detail=f"Cloudflare returned {r.status_code}")
+
+        # Update last_tested_at
+        now = datetime.now(timezone.utc).isoformat()
+        await sb_patch(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{service}"},
+            data={"last_tested_at": now, "updated_at": now},
+        )
+
+        logger.info(f"Connection test for service={service} user={user_id} tested={tested}")
+        return {"status": "ok", "tested": tested, "details": details}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"test_connection error for {service}: {e}")
+        raise HTTPException(status_code=500, detail="Connection test failed")
 
 
 # ─────────────────────────────────────────────
