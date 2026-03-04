@@ -488,6 +488,10 @@ class AgentRunRequest(BaseModel):
     input_data: dict  # must contain "message" key
 
 
+class AgentChatRequest(BaseModel):
+    message: str
+
+
 class ConnectionRequest(BaseModel):
     service: str
     credentials: dict
@@ -1048,6 +1052,382 @@ async def get_agent_runs(agent_id: str, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"get_agent_runs error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch runs")
+
+
+# ─────────────────────────────────────────────
+# AGENT CHAT (conversational, with history)
+# ─────────────────────────────────────────────
+
+@app.post("/api/agents/{agent_id}/chat")
+async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends(get_current_user)):
+    """Conversational chat endpoint that maintains message history."""
+    user_id = user["id"]
+    started_at = datetime.now(timezone.utc)
+    t0 = time.monotonic()
+
+    # 1. Load agent config
+    try:
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent = agent_rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"chat_agent load error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to load agent config")
+
+    # 2. Check API call limit
+    profile = {}
+    try:
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
+        profile = profile_rows[0] if profile_rows else {}
+        calls_this_month = profile.get("api_calls_this_month", 0) or 0
+        calls_limit = profile.get("api_calls_limit", 100) or 100
+        if calls_this_month >= calls_limit:
+            raise HTTPException(
+                status_code=429,
+                detail=f"API call limit reached ({calls_limit}/month). Upgrade your plan for more calls.",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"chat_agent limit check error: {e}")
+
+    # 3. Build system prompt
+    template_id = agent.get("template_id", "custom")
+    if template_id == "custom" and agent.get("system_prompt"):
+        system_prompt = agent["system_prompt"]
+    else:
+        system_prompt = TEMPLATE_PROMPTS.get(template_id, TEMPLATE_PROMPTS.get("custom", ""))
+        if agent.get("system_prompt") and template_id == "custom":
+            system_prompt = agent["system_prompt"]
+
+    goals = agent.get("goals") or []
+    if goals:
+        system_prompt += f"\n\nYour current goals:\n" + "\n".join(f"- {g}" for g in goals)
+
+    # 4. Load last 20 runs from agent_runs for conversation context
+    history_messages = []
+    try:
+        history_rows = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "agent_id": f"eq.{agent_id}",
+                "user_id": f"eq.{user_id}",
+                "status": "eq.completed",
+                "order": "started_at.desc",
+                "limit": "10",
+            },
+        )
+        # Reverse to get chronological order (oldest first)
+        for row in reversed(history_rows or []):
+            user_msg = (row.get("input_data") or {}).get("message", "")
+            assistant_msg = (row.get("output_data") or {}).get("response", "")
+            if user_msg:
+                history_messages.append({"role": "user", "content": user_msg})
+            if assistant_msg:
+                history_messages.append({"role": "assistant", "content": assistant_msg})
+    except Exception as e:
+        logger.warning(f"chat_agent: could not load message history: {e}")
+
+    # 5. Build full messages list: system + history + new user message
+    model = agent.get("model", "gpt-4o-mini")
+    temperature = agent.get("temperature", 0.7)
+    max_tokens = agent.get("max_tokens", 1024)
+    user_message = body.message.strip()
+
+    if not user_message:
+        raise HTTPException(status_code=400, detail="message is required")
+
+    messages = [{"role": "system", "content": system_prompt}]
+    messages.extend(history_messages)
+    messages.append({"role": "user", "content": user_message})
+
+    # 6. Insert run record
+    run_id = None
+    now_iso = started_at.isoformat()
+    try:
+        run_insert = await sb_post("/rest/v1/agent_runs", {
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "status": "running",
+            "input_data": {"message": user_message},
+            "model": model,
+            "started_at": now_iso,
+        })
+        if isinstance(run_insert, list) and run_insert:
+            run_id = run_insert[0]["id"]
+        elif isinstance(run_insert, dict):
+            run_id = run_insert.get("id")
+    except Exception as e:
+        logger.warning(f"chat_agent: failed to insert run record: {e}")
+
+    # 7. Call OpenAI
+    try:
+        completion = await openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except openai.RateLimitError:
+        if run_id:
+            await _fail_run(run_id, "OpenAI rate limit exceeded")
+        raise HTTPException(status_code=429, detail="OpenAI rate limit exceeded. Try again shortly.")
+    except openai.AuthenticationError:
+        if run_id:
+            await _fail_run(run_id, "OpenAI authentication error")
+        raise HTTPException(status_code=500, detail="OpenAI configuration error")
+    except Exception as e:
+        logger.error(f"chat_agent OpenAI call error: {e}")
+        if run_id:
+            await _fail_run(run_id, str(e))
+        raise HTTPException(status_code=500, detail="AI execution failed")
+
+    # 9. Parse response
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    response_text = completion.choices[0].message.content
+    prompt_tokens = completion.usage.prompt_tokens
+    completion_tokens = completion.usage.completion_tokens
+    total_tokens = completion.usage.total_tokens
+    cost_usd, price_usd = calculate_cost(model, prompt_tokens, completion_tokens)
+    completed_at = datetime.now(timezone.utc).isoformat()
+
+    # 8. Update DB records (run, usage, profile counters, agent stats)
+    try:
+        if run_id:
+            await sb_patch(
+                "/rest/v1/agent_runs",
+                params={"id": f"eq.{run_id}"},
+                data={
+                    "status": "completed",
+                    "output_data": {
+                        "response": response_text,
+                        "model": model,
+                        "finish_reason": completion.choices[0].finish_reason,
+                    },
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_usd": cost_usd,
+                    "error_message": None,
+                    "completed_at": completed_at,
+                    "duration_ms": duration_ms,
+                },
+            )
+
+        await sb_post("/rest/v1/usage_records", {
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "tokens_used": total_tokens,
+            "cost_usd": cost_usd,
+            "price_usd": price_usd,
+            "model": model,
+            "created_at": completed_at,
+        })
+
+        new_calls = (profile.get("api_calls_this_month") or 0) + 1
+        await sb_patch(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}"},
+            data={"api_calls_this_month": new_calls, "updated_at": completed_at},
+        )
+
+        new_total_runs = (agent.get("total_runs") or 0) + 1
+        new_total_tokens = (agent.get("total_tokens_used") or 0) + total_tokens
+        await sb_patch(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}"},
+            data={
+                "last_run_at": completed_at,
+                "total_runs": new_total_runs,
+                "total_tokens_used": new_total_tokens,
+                "status": "active",
+                "updated_at": completed_at,
+            },
+        )
+    except Exception as e:
+        logger.error(f"chat_agent DB update error: {e}")
+        # Don't fail the response — the AI already ran
+
+    return {
+        "message": response_text,
+        "run_id": run_id,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost_usd,
+            "price_usd": price_usd,
+        },
+        "duration_ms": duration_ms,
+    }
+
+
+@app.get("/api/agents/{agent_id}/messages")
+async def get_agent_messages(agent_id: str, user: dict = Depends(get_current_user)):
+    """Returns the chat history for an agent (last 50 messages)."""
+    user_id = user["id"]
+    try:
+        # Verify ownership
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "agent_id": f"eq.{agent_id}",
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.asc",
+                "limit": "50",
+            },
+        )
+        # Convert runs to message format
+        messages = []
+        for run in (runs or []):
+            user_msg = (run.get("input_data") or {}).get("message", "")
+            assistant_msg = (run.get("output_data") or {}).get("response", "")
+            if user_msg:
+                messages.append({
+                    "role": "user",
+                    "content": user_msg,
+                    "created_at": run.get("started_at"),
+                    "run_id": run.get("id"),
+                })
+            if assistant_msg:
+                messages.append({
+                    "role": "assistant",
+                    "content": assistant_msg,
+                    "created_at": run.get("completed_at") or run.get("started_at"),
+                    "run_id": run.get("id"),
+                    "tokens": run.get("total_tokens"),
+                    "cost_usd": run.get("cost_usd"),
+                    "status": run.get("status"),
+                })
+            if run.get("status") == "failed" and run.get("error_message"):
+                messages.append({
+                    "role": "error",
+                    "content": run.get("error_message"),
+                    "created_at": run.get("completed_at") or run.get("started_at"),
+                    "run_id": run.get("id"),
+                })
+        return messages
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_agent_messages error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch messages")
+
+
+@app.delete("/api/agents/{agent_id}/messages")
+async def delete_agent_messages(agent_id: str, user: dict = Depends(get_current_user)):
+    """Clears chat history for an agent."""
+    user_id = user["id"]
+    try:
+        # Verify ownership
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        await sb_delete(
+            "/rest/v1/agent_runs",
+            params={"agent_id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"},
+        )
+        # Reset agent stats
+        await sb_patch(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}"},
+            data={"total_runs": 0, "total_tokens_used": 0},
+        )
+        return {"message": "Chat history cleared successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"delete_agent_messages error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to clear chat history")
+
+
+@app.get("/api/agents/{agent_id}/activity")
+async def get_agent_activity(agent_id: str, user: dict = Depends(get_current_user)):
+    """Returns an activity log for an agent combining runs and other events."""
+    user_id = user["id"]
+    try:
+        # Verify ownership
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+
+        runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "agent_id": f"eq.{agent_id}",
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.desc",
+                "limit": "50",
+            },
+        )
+
+        activity_items = []
+        for run in (runs or []):
+            status = run.get("status", "unknown")
+            total_tokens = run.get("total_tokens") or 0
+            cost_usd = run.get("cost_usd") or 0
+            started_at = run.get("started_at")
+            completed_at = run.get("completed_at")
+            duration_ms = run.get("duration_ms")
+
+            if status == "completed":
+                description = f"Run completed — {total_tokens} tokens used (${cost_usd:.6f})"
+            elif status == "failed":
+                error_msg = run.get("error_message") or "unknown error"
+                description = f"Run failed — {error_msg}"
+            elif status == "running":
+                description = "Run in progress"
+            else:
+                description = f"Run {status}"
+
+            activity_items.append({
+                "type": "run",
+                "description": description,
+                "timestamp": completed_at or started_at,
+                "metadata": {
+                    "run_id": run.get("id"),
+                    "status": status,
+                    "model": run.get("model"),
+                    "prompt_tokens": run.get("prompt_tokens"),
+                    "completion_tokens": run.get("completion_tokens"),
+                    "total_tokens": total_tokens,
+                    "cost_usd": cost_usd,
+                    "duration_ms": duration_ms,
+                    "started_at": started_at,
+                    "completed_at": completed_at,
+                },
+            })
+
+        return activity_items
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_agent_activity error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch activity")
 
 
 # ─────────────────────────────────────────────
