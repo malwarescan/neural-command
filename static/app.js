@@ -14,7 +14,7 @@
   // ── SUPABASE CLIENT (initialized after config loads) ──
   let supabase = null;
 
-  // ── IN-MEMORY STATE ────────────────────
+  // ── IN-MEMORY STATE ────────────────────────
   let currentSession = null;
   let cachedProfile = null;
   let sidebarOpen = false;
@@ -35,10 +35,10 @@
     rules: [],
   };
 
-  // ── LOGO SVG ───────────────────────────
+  // ── LOGO SVG ───────────────────────────────
   const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NCq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
 
-  // ── HELPERS ──────────────────────────
+  // ── HELPERS ────────────────────────────────
   function $(sel) { return document.querySelector(sel); }
   function $$(sel) { return document.querySelectorAll(sel); }
   function el(tag, attrs, ...children) {
@@ -79,7 +79,7 @@
     return div.innerHTML;
   }
 
-  // ── TOAST ────────────────────────────
+  // ── TOAST ──────────────────────────────────
   function toast(message, type = 'info') {
     const container = document.getElementById('toast-container');
     const t = el('div', { className: `toast toast-${type}` });
@@ -93,7 +93,7 @@
     }, 4000);
   }
 
-  // ── API FETCH HELPER ─────────────────────
+  // ── API FETCH HELPER ───────────────────────
   async function apiFetch(path, options = {}) {
     const headers = { 'Content-Type': 'application/json' };
     if (currentSession?.access_token) {
@@ -108,7 +108,7 @@
     return data;
   }
 
-  // ── ROUTER ───────────────────────────
+  // ── ROUTER ─────────────────────────────────
   function navigate(hash) {
     window.location.hash = hash;
   }
@@ -134,7 +134,7 @@
     return params;
   }
 
-  // ── RENDER ENGINE ──────────────────────
+  // ── RENDER ENGINE ──────────────────────────
   function render() {
     const route = getRoute();
     const app = document.getElementById('app');
@@ -163,7 +163,7 @@
     requestAnimationFrame(() => lucide.createIcons());
   }
 
-  // ── AUTH VIEWS ─────────────────────────
+  // ── AUTH VIEWS ─────────────────────────────
   function renderAuthView(route, container) {
     let html = '';
     if (route === '#/login') html = loginView();
@@ -332,7 +332,7 @@
     }
   }
 
-  // ── APP SHELL ──────────────────────────
+  // ── APP SHELL ──────────────────────────────
   function renderAppShell(route, container) {
     const navItems = [
       { icon: 'layout-dashboard', label: 'Dashboard', hash: '#/dashboard' },
@@ -436,7 +436,7 @@
     }
   }
 
-  // ── PAGE CONTENT ROUTER ──────────────────
+  // ── PAGE CONTENT ROUTER ────────────────────
   function renderPageContent(route) {
     const main = document.getElementById('main-content');
     if (!main) return;
@@ -456,7 +456,7 @@
     else renderDashboard(main);
   }
 
-  // ── DASHBOARD VIEW ───────────────────────
+  // ── DASHBOARD VIEW ─────────────────────────
   async function renderDashboard(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -541,7 +541,7 @@
     }
   }
 
-  // ── AGENTS VIEW ────────────────────────
+  // ── AGENTS VIEW ────────────────────────────
   async function renderAgents(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -560,7 +560,7 @@
         return;
       }
 
-      const templateIcons = { seo: '\uD83D\uDD0D', social: '\uD83D\uDCF1', sales: '\uD83D\uDCBC', support: '\uD83C\uDFA7', content: '\u270D\uFE0F', analytics: '\uD83D\uDCCA', custom: '\u2699\uFE0F' };
+      const templateIcons = { seo: '🔍', social: '📱', sales: '💼', support: '🎧', content: '✍️', analytics: '📊', custom: '⚙️' };
 
       container.innerHTML = `
         <div class="page-header flex justify-between items-center">
@@ -575,7 +575,7 @@
             <div class="agent-card" data-id="${agent.id}">
               <div class="agent-card-head">
                 <div style="display:flex;align-items:center;gap:12px">
-                  <div class="agent-card-icon">${templateIcons[agent.template_id] || '\u2699\uFE0F'}</div>
+                  <div class="agent-card-icon">${templateIcons[agent.template_id] || '⚙️'}</div>
                   <div>
                     <div class="agent-card-name">${escapeHtml(agent.name)}</div>
                     <span class="badge badge-${agent.status}">${agent.status}</span>
@@ -635,7 +635,7 @@
     });
   }
 
-  // ── RUN AGENT MODAL ──────────────────────
+  // ── RUN AGENT MODAL ────────────────────────
   function showRunModal(agentId, agentName) {
     const overlay = el('div', { className: 'modal-overlay', id: 'run-modal' });
     overlay.innerHTML = `
@@ -701,7 +701,7 @@
     });
   }
 
-  // ── DELETE MODAL ─────────────────────────
+  // ── DELETE MODAL ───────────────────────────
   function showDeleteModal(agentId, agentName) {
     const overlay = el('div', { className: 'modal-overlay' });
     overlay.innerHTML = `
@@ -736,13 +736,13 @@
     });
   }
 
-  // ── AGENT DETAIL VIEW ────────────────────
+  // ── AGENT DETAIL VIEW ──────────────────────
   async function renderAgentDetail(container, agentId) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
       const agent = await apiFetch(`/api/agents/${agentId}`);
       const runs = await apiFetch(`/api/agents/${agentId}/runs`);
-      const templateIcons = { seo: '\uD83D\uDD0D', social: '\uD83D\uDCF1', sales: '\uD83D\uDCBC', support: '\uD83C\uDFA7', content: '\u270D\uFE0F', analytics: '\uD83D\uDCCA', custom: '\u2699\uFE0F' };
+      const templateIcons = { seo: '🔍', social: '📱', sales: '💼', support: '🎧', content: '✍️', analytics: '📊', custom: '⚙️' };
 
       container.innerHTML = `
         <div class="page-header flex justify-between items-center">
@@ -750,7 +750,7 @@
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
               <a href="#/agents" class="btn btn-ghost btn-sm"><i data-lucide="arrow-left" style="width:14px;height:14px"></i> Back</a>
             </div>
-            <h1 class="page-title">${templateIcons[agent.template_id] || '\u2699\uFE0F'} ${escapeHtml(agent.name)}</h1>
+            <h1 class="page-title">${templateIcons[agent.template_id] || '⚙️'} ${escapeHtml(agent.name)}</h1>
             <p class="page-subtitle">${escapeHtml(agent.description || 'No description')}</p>
           </div>
           <div style="display:flex;gap:8px">
@@ -932,7 +932,7 @@
     }
   }
 
-  // ── WIZARD VIEW ────────────────────────
+  // ── WIZARD VIEW ────────────────────────────
   let wizardTemplates = [];
 
   async function renderWizard(container) {
@@ -1075,12 +1075,12 @@
 
   function renderWizardConnect(el) {
     const services = [
-      { id: 'google_search_console', name: 'Google Search Console', icon: '\uD83D\uDD0D' },
-      { id: 'google_analytics', name: 'Google Analytics', icon: '\uD83D\uDCCA' },
-      { id: 'social_media', name: 'Social Media', icon: '\uD83D\uDCF1' },
-      { id: 'crm', name: 'CRM', icon: '\uD83D\uDCBC' },
-      { id: 'email', name: 'Email', icon: '\u2709\uFE0F' },
-      { id: 'custom_api', name: 'Custom API', icon: '\uD83D\uDD0C' },
+      { id: 'google_search_console', name: 'Google Search Console', icon: '🔍' },
+      { id: 'google_analytics', name: 'Google Analytics', icon: '📊' },
+      { id: 'social_media', name: 'Social Media', icon: '📱' },
+      { id: 'crm', name: 'CRM', icon: '💼' },
+      { id: 'email', name: 'Email', icon: '✉️' },
+      { id: 'custom_api', name: 'Custom API', icon: '🔌' },
     ];
 
     el.innerHTML = `
@@ -1279,7 +1279,7 @@
         <div style="display:grid;gap:16px">
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Template</div>
-            <div class="font-semibold">${template.icon || '\u2699\uFE0F'} ${escapeHtml(template.name || wizardData.template_id || 'Custom')}</div>
+            <div class="font-semibold">${template.icon || '⚙️'} ${escapeHtml(template.name || wizardData.template_id || 'Custom')}</div>
           </div>
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Name</div>
@@ -1394,7 +1394,7 @@
     }
   }
 
-  // ── TEMPLATES VIEW ───────────────────────
+  // ── TEMPLATES VIEW ─────────────────────────
   async function renderTemplates(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -1439,7 +1439,7 @@
     }
   }
 
-  // ── CONNECTIONS VIEW ─────────────────────
+  // ── CONNECTIONS VIEW ───────────────────────
   async function renderConnections(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
 
@@ -1448,37 +1448,37 @@
         label: 'Data Sources',
         description: 'Connect analytics and search platforms for your agents to read',
         services: [
-          { id: 'google_search_console', name: 'Google Search Console', icon: '\uD83D\uDD0D', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
-          { id: 'google_analytics', name: 'Google Analytics', icon: '\uD83D\uDCCA', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
-          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '\uD83C\uDD71\uFE0F', desc: 'Bing search data, crawl stats, SEO issues', auth: 'oauth' },
-          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '\uD83D\uDD25', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
-          { id: 'cloudflare', name: 'Cloudflare', icon: '\u2601\uFE0F', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
+          { id: 'google_search_console', name: 'Google Search Console', icon: '🔍', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
+          { id: 'google_analytics', name: 'Google Analytics', icon: '📊', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
+          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '🅱️', desc: 'Bing search data, crawl stats, SEO issues', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'From Bing Webmaster → Settings → API Access'}] },
+          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '🔥', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
+          { id: 'cloudflare', name: 'Cloudflare', icon: '☁️', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
         ]
       },
       {
         label: 'AI Models',
         description: 'Configure AI model access for agent intelligence',
         services: [
-          { id: 'openai', name: 'OpenAI', icon: '\uD83E\uDD16', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
-          { id: 'google_gemini', name: 'Google Gemini', icon: '\uD83D\uDC8E', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
-          { id: 'nano_banana', name: 'Nano Banana', icon: '\uD83C\uDF4C', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
+          { id: 'openai', name: 'OpenAI', icon: '🤖', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
+          { id: 'google_gemini', name: 'Google Gemini', icon: '💎', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
+          { id: 'nano_banana', name: 'Nano Banana', icon: '🍌', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
         ]
       },
       {
         label: 'Deployment',
         description: 'Push code and manage infrastructure',
         services: [
-          { id: 'github', name: 'GitHub', icon: '\uD83D\uDC19', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
+          { id: 'github', name: 'GitHub', icon: '🐙', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
         ]
       },
       {
         label: 'Social Publishing',
         description: 'Post and schedule content across social platforms',
         services: [
-          { id: 'twitter', name: 'X (Twitter)', icon: '\uD835\uDD4F', desc: 'Post tweets, threads, and media', auth: 'oauth' },
-          { id: 'facebook', name: 'Facebook', icon: '\uD83D\uDCD8', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
-          { id: 'instagram', name: 'Instagram', icon: '\uD83D\uDCF8', desc: 'Publish posts and stories', auth: 'oauth' },
-          { id: 'tiktok', name: 'TikTok', icon: '\uD83C\uDFB5', desc: 'Upload videos and manage content', auth: 'oauth' },
+          { id: 'twitter', name: 'X (Twitter)', icon: '𝕏', desc: 'Post tweets, threads, and media', auth: 'oauth' },
+          { id: 'facebook', name: 'Facebook', icon: '📘', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
+          { id: 'instagram', name: 'Instagram', icon: '📸', desc: 'Publish posts and stories', auth: 'oauth' },
+          { id: 'tiktok', name: 'TikTok', icon: '🎵', desc: 'Upload videos and manage content', auth: 'oauth' },
         ]
       }
     ];
@@ -1652,7 +1652,7 @@
     }
   }
 
-  // ── BILLING VIEW ─────────────────────────
+  // ── BILLING VIEW ───────────────────────────
   async function renderBilling(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -1798,7 +1798,7 @@
     }
   }
 
-  // ── SETTINGS VIEW ────────────────────────
+  // ── SETTINGS VIEW ──────────────────────────
   async function renderSettings(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -1899,7 +1899,7 @@
     }
   }
 
-  // ── SIDEBAR TOGGLE ───────────────────────
+  // ── SIDEBAR TOGGLE ─────────────────────────
   function toggleSidebar() {
     const sidebar = document.getElementById('sidebar');
     const backdrop = document.getElementById('sidebar-backdrop');
@@ -1908,7 +1908,7 @@
     backdrop?.classList.toggle('open', sidebarOpen);
   }
 
-  // ── INIT ───────────────────────────────
+  // ── INIT ───────────────────────────────────
   async function init() {
     // 1. Load config from backend
     try {
@@ -1967,7 +1967,7 @@
     },
   };
 
-  // ── BOOT ─────────────────────────────
+  // ── BOOT ───────────────────────────────────
   init();
 
 })();
