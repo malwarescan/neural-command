@@ -1305,12 +1305,21 @@ async def oauth_callback(code: str = None, state: str = None, error: str = None)
         raise HTTPException(status_code=500, detail="OAuth callback processing failed")
 
     html = f"""<html><body><script>
+  // Signal the parent window via multiple methods
+  try {{
+    localStorage.setItem('oauth_complete', JSON.stringify({{service: '{service}', ts: Date.now()}}));
+  }} catch(e) {{}}
   if (window.opener) {{
-    window.opener.postMessage({{type: 'oauth_complete', service: '{service}'}}, '*');
-    window.close();
-  }} else {{
-    window.location.href = '/#/connections';
+    try {{
+      window.opener.postMessage({{type: 'oauth_complete', service: '{service}'}}, '*');
+    }} catch(e) {{}}
   }}
+  // Always try to close the popup
+  window.close();
+  // Fallback if window.close() doesn't work (e.g., not opened by script)
+  setTimeout(function() {{
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connected!</h2><p>{service} has been connected successfully.</p><p>You can close this window.</p></div>';
+  }}, 500);
 </script></body></html>"""
     return HTMLResponse(content=html)
 
