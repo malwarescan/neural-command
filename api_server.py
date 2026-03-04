@@ -1204,20 +1204,33 @@ async def oauth_callback(code: str = None, state: str = None, error: str = None)
         logger.warning(f"OAuth callback error from provider: {error}")
         html = f"""<html><body><script>
   if (window.opener) {{
-    window.opener.postMessage({{type: 'oauth_error', error: '{error}'}}, '*');
-    window.close();
-  }} else {{
-    window.location.href = '/#/connections?error={error}';
+    try {{ window.opener.postMessage({{type: 'oauth_error', error: '{error}'}}, '*'); }} catch(e) {{}}
   }}
+  window.close();
+  setTimeout(function() {{
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connection Failed</h2><p>Error: {error}</p><p>You can close this window and try again.</p></div>';
+  }}, 500);
 </script></body></html>"""
         return HTMLResponse(content=html)
 
     if not code or not state:
-        raise HTTPException(status_code=400, detail="Missing code or state parameter")
+        html = """<html><body><script>
+  window.close();
+  setTimeout(function() {
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connection Failed</h2><p>Missing authorization code. Please try again.</p></div>';
+  }, 500);
+</script></body></html>"""
+        return HTMLResponse(content=html)
 
     state_data = _oauth_states.get(state)
     if not state_data:
-        raise HTTPException(status_code=400, detail="Invalid or expired OAuth state")
+        html = """<html><body><script>
+  window.close();
+  setTimeout(function() {
+    document.body.innerHTML = '<div style="font-family:sans-serif;text-align:center;padding:60px 20px;"><h2>Connection Failed</h2><p>Session expired. Please close this window and try connecting again.</p></div>';
+  }, 500);
+</script></body></html>"""
+        return HTMLResponse(content=html)
 
     service = state_data["service"]
     user_id = state_data["user_id"]
