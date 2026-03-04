@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════
-   Neural Command — Production Frontend SPA
+   Croutons Agents — Production Frontend SPA
    ═══════════════════════════════════════════════ */
 
 (function () {
@@ -36,7 +36,7 @@
   };
 
   // ── LOGO SVG ───────────────────────────────
-  const LOGO_SVG = `<svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="6" fill="#00a6f4"/><path d="M8 16h6l2-6 4 12 2-6h4" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const LOGO_SVG = `<svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#000"/><text x="16" y="22" font-size="14" font-weight="700" fill="#fff" text-anchor="middle" font-family="system-ui, sans-serif">c</text></svg>`;
 
   // ── HELPERS ────────────────────────────────
   function $(sel) { return document.querySelector(sel); }
@@ -178,7 +178,7 @@
       <div class="auth-card">
         <div class="auth-logo">
           <div class="auth-logo-icon">${LOGO_SVG}</div>
-          <div class="auth-logo-text">Neural Command</div>
+          <div class="auth-logo-text">Croutons Agents</div>
         </div>
         <h1 class="auth-title">Welcome back</h1>
         <p class="auth-subtitle">Sign in to manage your AI agents</p>
@@ -206,7 +206,7 @@
       <div class="auth-card">
         <div class="auth-logo">
           <div class="auth-logo-icon">${LOGO_SVG}</div>
-          <div class="auth-logo-text">Neural Command</div>
+          <div class="auth-logo-text">Croutons Agents</div>
         </div>
         <h1 class="auth-title">Create your account</h1>
         <p class="auth-subtitle">Start deploying AI agents in minutes</p>
@@ -238,7 +238,7 @@
       <div class="auth-card">
         <div class="auth-logo">
           <div class="auth-logo-icon">${LOGO_SVG}</div>
-          <div class="auth-logo-text">Neural Command</div>
+          <div class="auth-logo-text">Croutons Agents</div>
         </div>
         <h1 class="auth-title">Reset your password</h1>
         <p class="auth-subtitle">Enter your email and we'll send a reset link</p>
@@ -364,7 +364,7 @@
         <aside class="sidebar" id="sidebar">
           <div class="sidebar-brand">
             <div class="sidebar-brand-icon">${LOGO_SVG}</div>
-            <div class="sidebar-brand-name">Neural Command</div>
+            <div class="sidebar-brand-name">Croutons Agents</div>
           </div>
           <nav class="sidebar-nav">
             <div class="sidebar-section-label">Navigation</div>
