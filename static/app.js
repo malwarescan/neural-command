@@ -36,7 +36,7 @@
   };
 
   // ── LOGO SVG ───────────────────────────────
-  const LOGO_SVG = `<svg width="20" height="20" viewBox="0 0 32 32" fill="none"><rect width="32" height="32" rx="8" fill="#000"/><text x="16" y="22" font-size="14" font-weight="700" fill="#fff" text-anchor="middle" font-family="system-ui, sans-serif">c</text></svg>`;
+  const LOGO_SVG = `<img src="/static/croutons-icon.jpg" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
 
   // ── HELPERS ────────────────────────────────
   function $(sel) { return document.querySelector(sel); }
