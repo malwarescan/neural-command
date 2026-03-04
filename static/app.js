@@ -5,14 +5,14 @@
 (function () {
   'use strict';
 
-  // ── CONFIG ─────────────────────────────────
+  // ── CONFIG (loaded from /api/config) ──────
   const API = '';
-  const SUPABASE_URL = 'https://jhtxerijupjkuxxzklpf.supabase.co';
-  const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpodHhlcmlqdXBqa3V4eHprbHBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODUyOTQsImV4cCI6MjA4ODE2MTI5NH0.V15fpqF5SdxQiSXNkoEHZUB7dmCKu-yiP0jm3pk1nvc';
-  const STRIPE_PK = '';
+  let SUPABASE_URL = '';
+  let SUPABASE_ANON_KEY = '';
+  let STRIPE_PK = '';
 
-  // ── SUPABASE CLIENT ────────────────────────
-  const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  // ── SUPABASE CLIENT (initialized after config loads) ──
+  let supabase = null;
 
   // ── IN-MEMORY STATE ────────────────────────
   let currentSession = null;
@@ -1756,7 +1756,24 @@
 
   // ── INIT ───────────────────────────────────
   async function init() {
-    // Listen for auth state changes
+    // 1. Load config from backend
+    try {
+      const cfgRes = await fetch(`${API}/api/config`);
+      if (!cfgRes.ok) throw new Error('Failed to load config');
+      const cfg = await cfgRes.json();
+      SUPABASE_URL = cfg.supabase_url;
+      SUPABASE_ANON_KEY = cfg.supabase_anon_key;
+      STRIPE_PK = cfg.stripe_publishable_key || '';
+    } catch (err) {
+      console.error('Config load failed:', err);
+      document.getElementById('app').innerHTML = '<div style="padding:2rem;text-align:center;"><h2>Unable to connect to server</h2><p>Please try again in a moment.</p></div>';
+      return;
+    }
+
+    // 2. Initialize Supabase client
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 3. Listen for auth state changes
     supabase.auth.onAuthStateChange((event, session) => {
       const hadSession = !!currentSession;
       currentSession = session;
@@ -1771,7 +1788,7 @@
       }
     });
 
-    // Get initial session
+    // 4. Get initial session
     const { data: { session } } = await supabase.auth.getSession();
     currentSession = session;
 

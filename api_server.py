@@ -23,27 +23,12 @@ from pydantic import BaseModel, EmailStr
 # ─────────────────────────────────────────────
 # Configuration
 # ─────────────────────────────────────────────
-SUPABASE_URL = os.getenv("SUPABASE_URL", "https://jhtxerijupjkuxxzklpf.supabase.co")
-SUPABASE_ANON_KEY = os.getenv(
-    "SUPABASE_ANON_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpodHhlcmlqdXBqa3V4eHprbHBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODUyOTQsImV4cCI6MjA4ODE2MTI5NH0.V15fpqF5SdxQiSXNkoEHZUB7dmCKu-yiP0jm3pk1nvc",
-)
-SUPABASE_SERVICE_ROLE_KEY = os.getenv(
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpodHhlcmlqdXBqa3V4eHprbHBmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjU4NTI5NCwiZXhwIjoyMDg4MTYxMjk0fQ.80imVAE0fUdW-yB6ptq_4FwBueT3Lk9Srxn4i8HlLnI",
-)
-OPENAI_API_KEY = os.getenv(
-    "OPENAI_API_KEY",
-    "",
-)
-STRIPE_SECRET_KEY = os.getenv(
-    "STRIPE_SECRET_KEY",
-    "",
-)
-STRIPE_PUBLISHABLE_KEY = os.getenv(
-    "STRIPE_PUBLISHABLE_KEY",
-    "",
-)
+SUPABASE_URL = os.getenv("SUPABASE_URL", "")
+SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
+SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+STRIPE_SECRET_KEY = os.getenv("STRIPE_SECRET_KEY", "")
+STRIPE_PUBLISHABLE_KEY = os.getenv("STRIPE_PUBLISHABLE_KEY", "")
 
 # ─────────────────────────────────────────────
 # Logging
@@ -284,6 +269,7 @@ async def setup_stripe_products():
     """Ensure Pro and Enterprise Stripe products/prices exist."""
     global STRIPE_PRICES
     try:
+        # Look for existing products
         products = stripe.Product.list(limit=100)
         existing = {p.name: p for p in products.data if p.active}
 
@@ -304,6 +290,7 @@ async def setup_stripe_products():
             )
             logger.info("Created Stripe product: Neural Command Enterprise")
 
+        # Find existing prices for each product
         def get_or_create_price(product_id: str, amount: int, nickname: str) -> str:
             prices = stripe.Price.list(product=product_id, active=True, limit=10)
             for p in prices.data:
@@ -416,8 +403,8 @@ class ConnectionRequest(BaseModel):
 
 class CheckoutRequest(BaseModel):
     plan: str  # "pro" or "enterprise"
-    success_url: Optional[str] = "https://neuralcommand.app/dashboard?upgraded=true"
-    cancel_url: Optional[str] = "https://neuralcommand.app/pricing"
+    success_url: Optional[str] = None
+    cancel_url: Optional[str] = None
 
 
 class WaitlistRequest(BaseModel):
@@ -447,6 +434,7 @@ async def auth_signup(body: SignupRequest):
                 raise HTTPException(status_code=r.status_code, detail=detail)
             data = r.json()
 
+        # If email confirmation is disabled, session is returned immediately
         return {
             "user": data.get("user"),
             "session": data.get("session"),
@@ -502,9 +490,13 @@ async def auth_logout(user: dict = Depends(get_current_user)):
 
 @app.get("/api/auth/me")
 async def auth_me(user: dict = Depends(get_current_user)):
+    """Return the current user's profile."""
     user_id = user["id"]
     try:
-        rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         if rows:
             return rows[0]
         return {"id": user_id, "email": user.get("email")}
@@ -521,7 +513,10 @@ async def auth_me(user: dict = Depends(get_current_user)):
 async def get_profile(user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         if not rows:
             raise HTTPException(status_code=404, detail="Profile not found")
         return rows[0]
@@ -539,8 +534,13 @@ async def update_profile(body: ProfileUpdateRequest, user: dict = Depends(get_cu
     if body.display_name is not None:
         update_data["display_name"] = body.display_name
     update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+
     try:
-        rows = await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data=update_data)
+        rows = await sb_patch(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}"},
+            data=update_data,
+        )
         return rows[0] if rows else {"message": "Updated"}
     except Exception as e:
         logger.error(f"update_profile error: {e}")
@@ -555,7 +555,10 @@ async def update_profile(body: ProfileUpdateRequest, user: dict = Depends(get_cu
 async def list_agents(user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        agents = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "order": "created_at.desc"})
+        agents = await sb_get(
+            "/rest/v1/agents",
+            params={"user_id": f"eq.{user_id}", "order": "created_at.desc"},
+        )
         return agents or []
     except Exception as e:
         logger.error(f"list_agents error: {e}")
@@ -565,19 +568,33 @@ async def list_agents(user: dict = Depends(get_current_user)):
 @app.post("/api/agents", status_code=201)
 async def create_agent(body: AgentCreateRequest, user: dict = Depends(get_current_user)):
     user_id = user["id"]
+
+    # Check plan limits
     try:
-        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         profile = profile_rows[0] if profile_rows else {}
         agents_limit = profile.get("agents_limit", 3)
-        agents_count_rows = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "select": "id"})
+
+        agents_count_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"user_id": f"eq.{user_id}", "select": "id"},
+        )
         current_count = len(agents_count_rows or [])
+
         if current_count >= agents_limit:
-            raise HTTPException(status_code=403, detail=f"Agent limit reached ({agents_limit}). Upgrade your plan.")
+            raise HTTPException(
+                status_code=403,
+                detail=f"Agent limit reached ({agents_limit}). Upgrade your plan to create more agents.",
+            )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"create_agent limit check error: {e}")
 
+    # Resolve system prompt
     system_prompt = body.system_prompt
     if not system_prompt:
         system_prompt = TEMPLATE_PROMPTS.get(body.template_id or "custom", TEMPLATE_PROMPTS["custom"])
@@ -601,9 +618,12 @@ async def create_agent(body: AgentCreateRequest, user: dict = Depends(get_curren
         "created_at": now,
         "updated_at": now,
     }
+
     try:
         result = await sb_post("/rest/v1/agents", agent_data)
-        return result[0] if isinstance(result, list) else result
+        if isinstance(result, list):
+            return result[0]
+        return result
     except Exception as e:
         logger.error(f"create_agent error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create agent")
@@ -613,55 +633,82 @@ async def create_agent(body: AgentCreateRequest, user: dict = Depends(get_curren
 async def get_agent(agent_id: str, user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
         if not rows:
             raise HTTPException(status_code=404, detail="Agent not found")
         return rows[0]
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"get_agent error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch agent")
 
 
 @app.patch("/api/agents/{agent_id}")
 async def update_agent(agent_id: str, body: AgentUpdateRequest, user: dict = Depends(get_current_user)):
     user_id = user["id"]
+
+    # Verify ownership
     try:
-        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
         if not rows:
             raise HTTPException(status_code=404, detail="Agent not found")
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"update_agent ownership check error: {e}")
         raise HTTPException(status_code=500, detail="Failed to verify agent ownership")
 
     update_data: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    for field in ["name", "description", "status", "model", "temperature", "max_tokens", "system_prompt", "goals", "schedule", "rules"]:
+    for field in ["name", "description", "status", "model", "temperature", "max_tokens",
+                  "system_prompt", "goals", "schedule", "rules"]:
         val = getattr(body, field, None)
         if val is not None:
             update_data[field] = val
+
     try:
-        result = await sb_patch("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"}, data=update_data)
+        result = await sb_patch(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"},
+            data=update_data,
+        )
         return result[0] if isinstance(result, list) and result else {"message": "Updated"}
     except Exception as e:
+        logger.error(f"update_agent error: {e}")
         raise HTTPException(status_code=500, detail="Failed to update agent")
 
 
 @app.delete("/api/agents/{agent_id}")
 async def delete_agent(agent_id: str, user: dict = Depends(get_current_user)):
     user_id = user["id"]
+
+    # Verify ownership
     try:
-        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
         if not rows:
             raise HTTPException(status_code=404, detail="Agent not found")
     except HTTPException:
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail="Failed to verify ownership")
+
     try:
-        await sb_delete("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"})
+        await sb_delete(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"},
+        )
         return {"message": "Agent deleted successfully"}
     except Exception as e:
+        logger.error(f"delete_agent error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete agent")
 
 
@@ -675,37 +722,55 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
     started_at = datetime.now(timezone.utc)
     t0 = time.monotonic()
 
+    # 1. Load agent config
     try:
-        agent_rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
         if not agent_rows:
             raise HTTPException(status_code=404, detail="Agent not found")
         agent = agent_rows[0]
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"run_agent load error: {e}")
         raise HTTPException(status_code=500, detail="Failed to load agent config")
 
+    # 2. Check API call limit
     try:
-        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         profile = profile_rows[0] if profile_rows else {}
         calls_this_month = profile.get("api_calls_this_month", 0) or 0
         calls_limit = profile.get("api_calls_limit", 100) or 100
         if calls_this_month >= calls_limit:
-            raise HTTPException(status_code=429, detail=f"API call limit reached ({calls_limit}/month). Upgrade your plan.")
+            raise HTTPException(
+                status_code=429,
+                detail=f"API call limit reached ({calls_limit}/month). Upgrade your plan for more calls.",
+            )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"run_agent limit check error: {e}")
 
+    # 3. Build system prompt
     template_id = agent.get("template_id", "custom")
-    system_prompt = TEMPLATE_PROMPTS.get(template_id, TEMPLATE_PROMPTS["custom"])
-    if agent.get("system_prompt"):
+    if template_id == "custom" and agent.get("system_prompt"):
         system_prompt = agent["system_prompt"]
+    else:
+        system_prompt = TEMPLATE_PROMPTS.get(template_id, TEMPLATE_PROMPTS["custom"])
+        if agent.get("system_prompt") and template_id == "custom":
+            system_prompt = agent["system_prompt"]
 
+    # Append goals to system prompt if present
     goals = agent.get("goals") or []
     if goals:
         system_prompt += f"\n\nYour current goals:\n" + "\n".join(f"- {g}" for g in goals)
 
+    # 4. Call OpenAI
     model = agent.get("model", "gpt-4o-mini")
     temperature = agent.get("temperature", 0.7)
     max_tokens = agent.get("max_tokens", 1024)
@@ -721,6 +786,7 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
 
     run_id = None
     try:
+        # Insert a "running" run record first
         now_iso = started_at.isoformat()
         run_insert = await sb_post("/rest/v1/agent_runs", {
             "agent_id": agent_id,
@@ -737,6 +803,7 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
     except Exception as e:
         logger.warning(f"run_agent: failed to insert run record: {e}")
 
+    # Actual OpenAI call
     try:
         completion = await openai_client.chat.completions.create(
             model=model,
@@ -745,13 +812,20 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
             max_tokens=max_tokens,
         )
     except openai.RateLimitError:
+        if run_id:
+            await _fail_run(run_id, "OpenAI rate limit exceeded")
         raise HTTPException(status_code=429, detail="OpenAI rate limit exceeded. Try again shortly.")
     except openai.AuthenticationError:
+        if run_id:
+            await _fail_run(run_id, "OpenAI authentication error")
         raise HTTPException(status_code=500, detail="OpenAI configuration error")
     except Exception as e:
         logger.error(f"OpenAI call error: {e}")
+        if run_id:
+            await _fail_run(run_id, str(e))
         raise HTTPException(status_code=500, detail="AI execution failed")
 
+    # Parse response
     duration_ms = int((time.monotonic() - t0) * 1000)
     response_text = completion.choices[0].message.content
     prompt_tokens = completion.usage.prompt_tokens
@@ -759,54 +833,128 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
     total_tokens = completion.usage.total_tokens
     cost_usd, price_usd = calculate_cost(model, prompt_tokens, completion_tokens)
     completed_at = datetime.now(timezone.utc).isoformat()
-    output_data = {"response": response_text, "model": model, "finish_reason": completion.choices[0].finish_reason}
 
+    output_data = {
+        "response": response_text,
+        "model": model,
+        "finish_reason": completion.choices[0].finish_reason,
+    }
+
+    # 5–8. Update DB records concurrently
     try:
+        # Update agent_run to completed
         if run_id:
-            await sb_patch("/rest/v1/agent_runs", params={"id": f"eq.{run_id}"}, data={
-                "status": "completed", "output_data": output_data,
-                "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-                "total_tokens": total_tokens, "cost_usd": cost_usd,
-                "completed_at": completed_at, "duration_ms": duration_ms,
-            })
+            await sb_patch(
+                "/rest/v1/agent_runs",
+                params={"id": f"eq.{run_id}"},
+                data={
+                    "status": "completed",
+                    "output_data": output_data,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens,
+                    "cost_usd": cost_usd,
+                    "error_message": None,
+                    "completed_at": completed_at,
+                    "duration_ms": duration_ms,
+                },
+            )
+
+        # Insert usage record
         await sb_post("/rest/v1/usage_records", {
-            "user_id": user_id, "agent_id": agent_id, "run_id": run_id,
-            "tokens_used": total_tokens, "cost_usd": cost_usd, "price_usd": price_usd,
-            "model": model, "created_at": completed_at,
+            "user_id": user_id,
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "tokens_used": total_tokens,
+            "cost_usd": cost_usd,
+            "price_usd": price_usd,
+            "model": model,
+            "created_at": completed_at,
         })
+
+        # Increment profile counters
         new_calls = (profile.get("api_calls_this_month") or 0) + 1
-        await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data={"api_calls_this_month": new_calls})
-        await sb_patch("/rest/v1/agents", params={"id": f"eq.{agent_id}"}, data={
-            "last_run_at": completed_at,
-            "total_runs": (agent.get("total_runs") or 0) + 1,
-            "total_tokens_used": (agent.get("total_tokens_used") or 0) + total_tokens,
-        })
+        await sb_patch(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}"},
+            data={"api_calls_this_month": new_calls, "updated_at": completed_at},
+        )
+
+        # Update agent stats
+        new_total_runs = (agent.get("total_runs") or 0) + 1
+        new_total_tokens = (agent.get("total_tokens_used") or 0) + total_tokens
+        await sb_patch(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}"},
+            data={
+                "last_run_at": completed_at,
+                "total_runs": new_total_runs,
+                "total_tokens_used": new_total_tokens,
+                "status": "active",
+                "updated_at": completed_at,
+            },
+        )
     except Exception as e:
         logger.error(f"run_agent DB update error: {e}")
+        # Don't fail the response — the AI already ran
 
     return {
-        "run_id": run_id, "status": "completed", "output": output_data,
-        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
-                  "total_tokens": total_tokens, "cost_usd": cost_usd, "price_usd": price_usd},
+        "run_id": run_id,
+        "status": "completed",
+        "output": output_data,
+        "usage": {
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "total_tokens": total_tokens,
+            "cost_usd": cost_usd,
+            "price_usd": price_usd,
+        },
         "duration_ms": duration_ms,
     }
+
+
+async def _fail_run(run_id: str, error_msg: str):
+    """Mark a run as failed in the DB."""
+    try:
+        await sb_patch(
+            "/rest/v1/agent_runs",
+            params={"id": f"eq.{run_id}"},
+            data={
+                "status": "failed",
+                "error_message": error_msg,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except Exception as e:
+        logger.error(f"_fail_run error: {e}")
 
 
 @app.get("/api/agents/{agent_id}/runs")
 async def get_agent_runs(agent_id: str, user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        agent_rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        # Verify ownership
+        agent_rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
         if not agent_rows:
             raise HTTPException(status_code=404, detail="Agent not found")
-        runs = await sb_get("/rest/v1/agent_runs", params={
-            "agent_id": f"eq.{agent_id}", "user_id": f"eq.{user_id}",
-            "order": "started_at.desc", "limit": "50",
-        })
+
+        runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "agent_id": f"eq.{agent_id}",
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.desc",
+                "limit": "50",
+            },
+        )
         return runs or []
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"get_agent_runs error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch runs")
 
 
@@ -827,7 +975,11 @@ async def list_templates():
 async def list_connections(user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        rows = await sb_get("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "order": "created_at.desc"})
+        rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "order": "created_at.desc"},
+        )
+        # Mask credentials before returning
         connections = []
         for row in (rows or []):
             row_copy = dict(row)
@@ -836,6 +988,7 @@ async def list_connections(user: dict = Depends(get_current_user)):
             connections.append(row_copy)
         return connections
     except Exception as e:
+        logger.error(f"list_connections error: {e}")
         raise HTTPException(status_code=500, detail="Failed to list connections")
 
 
@@ -844,13 +997,35 @@ async def create_connection(body: ConnectionRequest, user: dict = Depends(get_cu
     user_id = user["id"]
     now = datetime.now(timezone.utc).isoformat()
     try:
-        existing = await sb_get("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}", "limit": "1"})
+        # Upsert — update if exists, else insert
+        existing = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}", "limit": "1"},
+        )
         if existing:
-            result = await sb_patch("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}"}, data={"credentials": body.credentials, "is_active": True, "last_tested_at": now, "updated_at": now})
+            result = await sb_patch(
+                "/rest/v1/connections",
+                params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}"},
+                data={
+                    "credentials": body.credentials,
+                    "is_active": True,
+                    "last_tested_at": now,
+                    "updated_at": now,
+                },
+            )
         else:
-            result = await sb_post("/rest/v1/connections", {"user_id": user_id, "service": body.service, "credentials": body.credentials, "is_active": True, "last_tested_at": now, "created_at": now, "updated_at": now})
+            result = await sb_post("/rest/v1/connections", {
+                "user_id": user_id,
+                "service": body.service,
+                "credentials": body.credentials,
+                "is_active": True,
+                "last_tested_at": now,
+                "created_at": now,
+                "updated_at": now,
+            })
         return {"message": "Connection saved", "service": body.service}
     except Exception as e:
+        logger.error(f"create_connection error: {e}")
         raise HTTPException(status_code=500, detail="Failed to save connection")
 
 
@@ -858,9 +1033,13 @@ async def create_connection(body: ConnectionRequest, user: dict = Depends(get_cu
 async def delete_connection(service: str, user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        await sb_delete("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{service}"})
+        await sb_delete(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": f"eq.{service}"},
+        )
         return {"message": f"Connection '{service}' removed"}
     except Exception as e:
+        logger.error(f"delete_connection error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete connection")
 
 
@@ -872,20 +1051,39 @@ async def delete_connection(service: str, user: dict = Depends(get_current_user)
 async def get_dashboard(user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        agents = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "select": "id,status"})
-        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
-        recent_runs = await sb_get("/rest/v1/agent_runs", params={"user_id": f"eq.{user_id}", "order": "started_at.desc", "limit": "5"})
+        agents = await sb_get(
+            "/rest/v1/agents",
+            params={"user_id": f"eq.{user_id}", "select": "id,status"},
+        )
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
+        recent_runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.desc",
+                "limit": "5",
+            },
+        )
+
         profile = profile_rows[0] if profile_rows else {}
         agents = agents or []
         active_count = sum(1 for a in agents if a.get("status") == "active")
+        running_count = sum(1 for r in (recent_runs or []) if r.get("status") == "running")
+
         return {
-            "total_agents": len(agents), "active_agents": active_count,
+            "total_agents": len(agents),
+            "active_agents": active_count,
+            "active_runs": running_count,
             "api_calls_this_month": profile.get("api_calls_this_month", 0),
             "api_calls_limit": profile.get("api_calls_limit", 100),
             "current_plan": profile.get("plan", "free"),
             "recent_runs": recent_runs or [],
         }
     except Exception as e:
+        logger.error(f"dashboard error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch dashboard data")
 
 
@@ -896,17 +1094,36 @@ async def get_dashboard(user: dict = Depends(get_current_user)):
 @app.get("/api/usage")
 async def get_usage(user: dict = Depends(get_current_user)):
     user_id = user["id"]
+    # Current month filter
     now = datetime.now(timezone.utc)
     month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
     try:
-        records = await sb_get("/rest/v1/usage_records", params={"user_id": f"eq.{user_id}", "created_at": f"gte.{month_start}", "order": "created_at.desc", "limit": "500"})
+        records = await sb_get(
+            "/rest/v1/usage_records",
+            params={
+                "user_id": f"eq.{user_id}",
+                "created_at": f"gte.{month_start}",
+                "order": "created_at.desc",
+                "limit": "500",
+            },
+        )
         records = records or []
+        total_tokens = sum(r.get("tokens_used", 0) for r in records)
+        total_cost = sum(r.get("cost_usd", 0) for r in records)
+        total_price = sum(r.get("price_usd", 0) for r in records)
+
         return {
             "period": {"start": month_start, "end": now.isoformat()},
             "records": records,
-            "summary": {"total_calls": len(records), "total_tokens": sum(r.get("tokens_used", 0) for r in records), "total_cost_usd": round(sum(r.get("cost_usd", 0) for r in records), 6)},
+            "summary": {
+                "total_calls": len(records),
+                "total_tokens": total_tokens,
+                "total_cost_usd": round(total_cost, 6),
+                "total_price_usd": round(total_price, 6),
+            },
         }
     except Exception as e:
+        logger.error(f"get_usage error: {e}")
         raise HTTPException(status_code=500, detail="Failed to fetch usage")
 
 
@@ -916,36 +1133,76 @@ async def create_checkout(body: CheckoutRequest, user: dict = Depends(get_curren
     plan = body.plan.lower()
     if plan not in STRIPE_PRICES:
         raise HTTPException(status_code=400, detail=f"Invalid plan '{plan}'. Choose 'pro' or 'enterprise'.")
+
     price_id = STRIPE_PRICES[plan]
+
     try:
-        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        # Get or create Stripe customer
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         profile = profile_rows[0] if profile_rows else {}
         stripe_customer_id = profile.get("stripe_customer_id")
+
         if not stripe_customer_id:
-            customer = stripe.Customer.create(email=user.get("email", ""), metadata={"supabase_user_id": user_id})
+            customer = stripe.Customer.create(
+                email=user.get("email", ""),
+                metadata={"supabase_user_id": user_id},
+            )
             stripe_customer_id = customer.id
-            await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data={"stripe_customer_id": stripe_customer_id})
+            # Save back to profile
+            await sb_patch(
+                "/rest/v1/profiles",
+                params={"id": f"eq.{user_id}"},
+                data={"stripe_customer_id": stripe_customer_id, "updated_at": datetime.now(timezone.utc).isoformat()},
+            )
+
+        base_url = os.getenv("APP_URL", "").rstrip("/")
+        success_url = body.success_url or f"{base_url}/#/dashboard?upgraded=true"
+        cancel_url = body.cancel_url or f"{base_url}/#/pricing"
+
         session = stripe.checkout.Session.create(
-            customer=stripe_customer_id, payment_method_types=["card"],
-            line_items=[{"price": price_id, "quantity": 1}], mode="subscription",
-            success_url=body.success_url, cancel_url=body.cancel_url,
+            customer=stripe_customer_id,
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=success_url,
+            cancel_url=cancel_url,
             metadata={"supabase_user_id": user_id, "plan": plan},
         )
-        return {"checkout_url": session.url, "session_id": session.id}
+
+        return {
+            "checkout_url": session.url,
+            "session_id": session.id,
+        }
     except stripe.StripeError as e:
+        logger.error(f"Stripe checkout error: {e}")
         raise HTTPException(status_code=500, detail=f"Stripe error: {e.user_message}")
     except Exception as e:
+        logger.error(f"create_checkout error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 
 @app.post("/api/billing/webhook")
 async def stripe_webhook(request: Request):
-    body_bytes = await request.body()
+    """Handle Stripe webhook events."""
+    body = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    # In production, verify the webhook signature
+    # For now, parse the event directly
     try:
+        event = stripe.Event.construct_from(
+            {"type": "checkout.session.completed", **{}},
+            stripe.api_key,
+        )
+        # Actually parse the raw body
         import json as _json
-        event_data = _json.loads(body_bytes)
+        event_data = _json.loads(body)
         event_type = event_data.get("type")
     except Exception as e:
+        logger.error(f"Webhook parse error: {e}")
         return JSONResponse({"error": "Invalid payload"}, status_code=400)
 
     if event_type == "checkout.session.completed":
@@ -953,13 +1210,48 @@ async def stripe_webhook(request: Request):
         supabase_user_id = session_obj.get("metadata", {}).get("supabase_user_id")
         plan = session_obj.get("metadata", {}).get("plan", "pro")
         subscription_id = session_obj.get("subscription")
+
         if supabase_user_id:
-            plan_limits = {"pro": {"api_calls_limit": 500, "agents_limit": 10}, "enterprise": {"api_calls_limit": 999999, "agents_limit": 999}}
+            plan_limits = {
+                "pro": {"api_calls_limit": 500, "agents_limit": 10},
+                "enterprise": {"api_calls_limit": 999999, "agents_limit": 999},
+            }
             limits = plan_limits.get(plan, plan_limits["pro"])
             try:
-                await sb_patch("/rest/v1/profiles", params={"id": f"eq.{supabase_user_id}"}, data={"plan": plan, "stripe_subscription_id": subscription_id, **limits})
+                await sb_patch(
+                    "/rest/v1/profiles",
+                    params={"id": f"eq.{supabase_user_id}"},
+                    data={
+                        "plan": plan,
+                        "stripe_subscription_id": subscription_id,
+                        "api_calls_limit": limits["api_calls_limit"],
+                        "agents_limit": limits["agents_limit"],
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+                logger.info(f"Upgraded user {supabase_user_id} to {plan}")
             except Exception as e:
                 logger.error(f"Webhook profile update error: {e}")
+
+    elif event_type == "customer.subscription.deleted":
+        # Downgrade to free
+        subscription_id = event_data.get("data", {}).get("object", {}).get("id")
+        if subscription_id:
+            try:
+                await sb_patch(
+                    "/rest/v1/profiles",
+                    params={"stripe_subscription_id": f"eq.{subscription_id}"},
+                    data={
+                        "plan": "free",
+                        "stripe_subscription_id": None,
+                        "api_calls_limit": 100,
+                        "agents_limit": 3,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception as e:
+                logger.error(f"Webhook subscription cancel error: {e}")
+
     return {"received": True}
 
 
@@ -967,16 +1259,28 @@ async def stripe_webhook(request: Request):
 async def billing_portal(user: dict = Depends(get_current_user)):
     user_id = user["id"]
     try:
-        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile_rows = await sb_get(
+            "/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "limit": "1"},
+        )
         profile = profile_rows[0] if profile_rows else {}
         stripe_customer_id = profile.get("stripe_customer_id")
+
         if not stripe_customer_id:
-            raise HTTPException(status_code=400, detail="No billing account found.")
-        portal = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url="https://neuralcommand.app/dashboard")
+            raise HTTPException(status_code=400, detail="No billing account found. Please subscribe first.")
+
+        portal = stripe.billing_portal.Session.create(
+            customer=stripe_customer_id,
+            return_url=os.getenv("APP_URL", "").rstrip("/") + "/#/dashboard",
+        )
         return {"portal_url": portal.url}
     except HTTPException:
         raise
+    except stripe.StripeError as e:
+        logger.error(f"Stripe portal error: {e}")
+        raise HTTPException(status_code=500, detail=f"Stripe error: {e.user_message}")
     except Exception as e:
+        logger.error(f"billing_portal error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create billing portal session")
 
 
@@ -986,17 +1290,28 @@ async def billing_portal(user: dict = Depends(get_current_user)):
 
 @app.post("/api/waitlist", status_code=201)
 async def join_waitlist(body: WaitlistRequest):
+    """Add email to waitlist — no auth required."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            r = await client.post(f"{SUPABASE_URL}/rest/v1/waitlist", headers={**sb_headers_service(), "Prefer": "return=minimal,resolution=ignore-duplicates", "on_conflict": "email"}, json={"email": body.email, "created_at": datetime.now(timezone.utc).isoformat()})
+            r = await client.post(
+                f"{SUPABASE_URL}/rest/v1/waitlist",
+                headers={
+                    **sb_headers_service(),
+                    "Prefer": "return=minimal,resolution=ignore-duplicates",
+                    "on_conflict": "email",
+                },
+                json={"email": body.email, "created_at": datetime.now(timezone.utc).isoformat()},
+            )
             if r.status_code in (200, 201, 204):
                 return {"message": "You've been added to the waitlist!"}
+            # 409 conflict = already on waitlist
             if r.status_code == 409:
                 return {"message": "You're already on the waitlist."}
             raise HTTPException(status_code=500, detail="Failed to join waitlist")
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"waitlist error: {e}")
         raise HTTPException(status_code=500, detail="Failed to join waitlist")
 
 
@@ -1006,11 +1321,30 @@ async def join_waitlist(body: WaitlistRequest):
 
 @app.get("/api/health")
 async def health_check():
-    return {"status": "ok", "service": "Neural Command API", "version": "1.0.0", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {
+        "status": "ok",
+        "service": "Neural Command API",
+        "version": "1.0.0",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "stripe_prices": STRIPE_PRICES,
+    }
+
+@app.get("/api/config")
+async def get_config():
+    """Return public config (safe to expose to frontend)."""
+    return {
+        "supabase_url": SUPABASE_URL,
+        "supabase_anon_key": SUPABASE_ANON_KEY,
+        "stripe_publishable_key": STRIPE_PUBLISHABLE_KEY,
+    }
 
 
 # ─────────────────────────────────────────────
-# Static Frontend
+# Main
+# ─────────────────────────────────────────────
+
+# ─────────────────────────────────────────────
+# Serve Static Frontend
 # ─────────────────────────────────────────────
 
 import pathlib
@@ -1023,6 +1357,7 @@ if STATIC_DIR.exists():
     async def serve_index():
         return FileResponse(str(STATIC_DIR / "index.html"))
 
+    # Catch-all for SPA — serve index.html for non-API routes
     @app.get("/{path:path}")
     async def serve_spa(path: str):
         file_path = STATIC_DIR / path
