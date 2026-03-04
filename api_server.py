@@ -1,0 +1,1037 @@
+#!/usr/bin/env python3
+"""
+Neural Command — Production API Server
+FastAPI backend connecting to Supabase, OpenAI, and Stripe.
+"""
+
+import logging
+import os
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime, timezone
+from typing import Any, Optional
+
+import httpx
+import openai
+import stripe
+from fastapi import FastAPI, HTTPException, Request, Depends, Header
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, EmailStr
+
+# ─────────────────────────────────────────────
+# Configuration
+# ─────────────────────────────────────────────
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://jhtxerijupjkuxxzklpf.supabase.co")
+SUPABASE_ANON_KEY = os.getenv(
+    "SUPABASE_ANON_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpodHhlcmlqdXBqa3V4eHprbHBmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1ODUyOTQsImV4cCI6MjA4ODE2MTI5NH0.V15fpqF5SdxQiSXNkoEHZUB7dmCKu-yiP0jm3pk1nvc",
+)
+SUPABASE_SERVICE_ROLE_KEY = os.getenv(
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImpodHhlcmlqdXBqa3V4eHprbHBmIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3MjU4NTI5NCwiZXhwIjoyMDg4MTYxMjk0fQ.80imVAE0fUdW-yB6ptq_4FwBueT3Lk9Srxn4i8HlLnI",
+)
+OPENAI_API_KEY = os.getenv(
+    "OPENAI_API_KEY",
+    "",
+)
+STRIPE_SECRET_KEY = os.getenv(
+    "STRIPE_SECRET_KEY",
+    "",
+)
+STRIPE_PUBLISHABLE_KEY = os.getenv(
+    "STRIPE_PUBLISHABLE_KEY",
+    "",
+)
+
+# ─────────────────────────────────────────────
+# Logging
+# ─────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s — %(message)s",
+)
+logger = logging.getLogger("neural-command")
+
+# ─────────────────────────────────────────────
+# SDK Clients
+# ─────────────────────────────────────────────
+openai_client = openai.AsyncOpenAI(api_key=OPENAI_API_KEY)
+stripe.api_key = STRIPE_SECRET_KEY
+
+# Global Stripe price IDs (resolved at startup)
+STRIPE_PRICES: dict[str, str] = {}
+
+# ─────────────────────────────────────────────
+# Helpers — Supabase HTTP
+# ─────────────────────────────────────────────
+
+def sb_headers_anon() -> dict:
+    return {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+    }
+
+
+def sb_headers_service() -> dict:
+    return {
+        "apikey": SUPABASE_SERVICE_ROLE_KEY,
+        "Authorization": f"Bearer {SUPABASE_SERVICE_ROLE_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+def sb_headers_user(token: str) -> dict:
+    return {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation",
+    }
+
+
+async def sb_get(path: str, params: dict = None, token: str = None) -> Any:
+    """GET Supabase REST. Uses service role unless user token provided."""
+    headers = sb_headers_user(token) if token else sb_headers_service()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.get(f"{SUPABASE_URL}{path}", headers=headers, params=params)
+        r.raise_for_status()
+        return r.json()
+
+
+async def sb_post(path: str, data: dict, token: str = None) -> Any:
+    headers = sb_headers_user(token) if token else sb_headers_service()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.post(f"{SUPABASE_URL}{path}", headers=headers, json=data)
+        r.raise_for_status()
+        return r.json()
+
+
+async def sb_patch(path: str, params: dict, data: dict, token: str = None) -> Any:
+    headers = sb_headers_user(token) if token else sb_headers_service()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.patch(
+            f"{SUPABASE_URL}{path}", headers=headers, params=params, json=data
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+async def sb_delete(path: str, params: dict, token: str = None) -> Any:
+    headers = sb_headers_user(token) if token else sb_headers_service()
+    async with httpx.AsyncClient(timeout=15) as client:
+        r = await client.delete(
+            f"{SUPABASE_URL}{path}", headers=headers, params=params
+        )
+        r.raise_for_status()
+        return r.json()
+
+
+# ─────────────────────────────────────────────
+# Auth Middleware Helper
+# ─────────────────────────────────────────────
+
+async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
+    """Verify JWT by calling Supabase /auth/v1/user. Returns user dict."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+    token = authorization.split(" ", 1)[1]
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.get(
+            f"{SUPABASE_URL}/auth/v1/user",
+            headers={
+                "apikey": SUPABASE_ANON_KEY,
+                "Authorization": f"Bearer {token}",
+            },
+        )
+        if r.status_code != 200:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        user = r.json()
+        user["_token"] = token
+        return user
+
+
+# ─────────────────────────────────────────────
+# Cost Calculation
+# ─────────────────────────────────────────────
+
+MODEL_COSTS = {
+    "gpt-4o":         {"input": 2.50,  "output": 10.00},
+    "gpt-4o-mini":    {"input": 0.15,  "output": 0.60},
+    "gpt-3.5-turbo":  {"input": 0.50,  "output": 1.50},
+}
+
+
+def calculate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> tuple[float, float]:
+    """Returns (cost_usd, price_usd). price is 2x cost."""
+    rates = MODEL_COSTS.get(model, MODEL_COSTS["gpt-4o-mini"])
+    cost = (prompt_tokens / 1_000_000) * rates["input"] + (completion_tokens / 1_000_000) * rates["output"]
+    price = cost * 2
+    return round(cost, 8), round(price, 8)
+
+
+# ─────────────────────────────────────────────
+# Templates
+# ─────────────────────────────────────────────
+
+TEMPLATES = [
+    {
+        "id": "seo",
+        "name": "SEO Analyst",
+        "icon": "🔍",
+        "description": "Audits websites, tracks rankings, and recommends SEO optimizations",
+        "tags": ["seo", "marketing", "analytics"],
+        "default_goals": ["Analyze on-page SEO", "Identify keyword opportunities", "Monitor backlinks"],
+        "default_system_prompt": (
+            "You are an expert SEO analyst with deep knowledge of search engine optimization, "
+            "technical SEO, content strategy, and keyword research. You audit websites, track "
+            "rankings, identify optimization opportunities, and provide actionable recommendations "
+            "to improve organic search visibility. Always provide specific, data-driven advice."
+        ),
+    },
+    {
+        "id": "social",
+        "name": "Social Media Strategist",
+        "icon": "📱",
+        "description": "Monitors engagement, suggests content, and analyzes social trends",
+        "tags": ["social", "marketing", "content"],
+        "default_goals": ["Monitor brand mentions", "Suggest viral content ideas", "Analyze engagement"],
+        "default_system_prompt": (
+            "You are a seasoned social media strategist specializing in audience growth, "
+            "content virality, and community engagement across platforms (Instagram, X/Twitter, "
+            "LinkedIn, TikTok, Facebook). You analyze trends, suggest content ideas, schedule "
+            "posts strategically, and measure ROI. You know each platform's algorithm deeply."
+        ),
+    },
+    {
+        "id": "sales",
+        "name": "Sales Assistant",
+        "icon": "💼",
+        "description": "Qualifies leads, drafts outreach emails, and tracks pipeline",
+        "tags": ["sales", "crm", "outreach"],
+        "default_goals": ["Qualify inbound leads", "Draft personalized outreach", "Track deal stage"],
+        "default_system_prompt": (
+            "You are an elite sales assistant with expertise in B2B sales, lead qualification, "
+            "CRM management, and persuasive communication. You help qualify prospects using "
+            "BANT/MEDDIC frameworks, draft compelling outreach emails, create follow-up sequences, "
+            "and analyze pipeline health. You understand buyer psychology and objection handling."
+        ),
+    },
+    {
+        "id": "support",
+        "name": "Customer Support Agent",
+        "icon": "🎧",
+        "description": "Triages support tickets and suggests resolutions",
+        "tags": ["support", "customer success", "help desk"],
+        "default_goals": ["Triage incoming tickets", "Suggest resolutions", "Escalate critical issues"],
+        "default_system_prompt": (
+            "You are a skilled customer support specialist focused on delivering exceptional "
+            "customer experiences. You triage tickets by priority and category, suggest accurate "
+            "resolutions based on knowledge base articles, identify trends in support requests, "
+            "and know when to escalate. You communicate with empathy and clarity."
+        ),
+    },
+    {
+        "id": "content",
+        "name": "Content Strategist",
+        "icon": "✍️",
+        "description": "Generates content ideas, drafts articles, and manages editorial calendar",
+        "tags": ["content", "writing", "editorial"],
+        "default_goals": ["Generate content ideas", "Draft long-form articles", "Manage content calendar"],
+        "default_system_prompt": (
+            "You are a professional content strategist and writer with expertise in creating "
+            "engaging, SEO-optimized content across formats (blog posts, whitepapers, case studies, "
+            "newsletters, social copy). You develop content strategies aligned with business goals, "
+            "manage editorial calendars, and ensure consistent brand voice and messaging."
+        ),
+    },
+    {
+        "id": "analytics",
+        "name": "Data Analyst",
+        "icon": "📊",
+        "description": "Tracks metrics, generates reports, and identifies anomalies",
+        "tags": ["analytics", "data", "reporting"],
+        "default_goals": ["Track KPIs", "Generate weekly reports", "Detect metric anomalies"],
+        "default_system_prompt": (
+            "You are a data analyst specializing in business intelligence, metric tracking, "
+            "and performance reporting. You analyze datasets, identify trends and anomalies, "
+            "create clear data visualizations descriptions, and translate numbers into actionable "
+            "business insights. You are proficient with SQL, Python, and BI tools."
+        ),
+    },
+    {
+        "id": "custom",
+        "name": "Custom Agent",
+        "icon": "⚙️",
+        "description": "Fully customizable agent with your own system prompt and goals",
+        "tags": ["custom", "flexible"],
+        "default_goals": ["Define your own goals"],
+        "default_system_prompt": "You are a helpful AI assistant. Your instructions will be customized by the user.",
+    },
+]
+
+TEMPLATE_PROMPTS = {t["id"]: t["default_system_prompt"] for t in TEMPLATES}
+
+
+# ─────────────────────────────────────────────
+# Startup — Stripe Product/Price Setup
+# ─────────────────────────────────────────────
+
+async def setup_stripe_products():
+    """Ensure Pro and Enterprise Stripe products/prices exist."""
+    global STRIPE_PRICES
+    try:
+        products = stripe.Product.list(limit=100)
+        existing = {p.name: p for p in products.data if p.active}
+
+        pro_product = existing.get("Neural Command Pro")
+        enterprise_product = existing.get("Neural Command Enterprise")
+
+        if not pro_product:
+            pro_product = stripe.Product.create(
+                name="Neural Command Pro",
+                description="Neural Command Pro — 500 API calls/month, 10 agents",
+            )
+            logger.info("Created Stripe product: Neural Command Pro")
+
+        if not enterprise_product:
+            enterprise_product = stripe.Product.create(
+                name="Neural Command Enterprise",
+                description="Neural Command Enterprise — Unlimited API calls, unlimited agents",
+            )
+            logger.info("Created Stripe product: Neural Command Enterprise")
+
+        def get_or_create_price(product_id: str, amount: int, nickname: str) -> str:
+            prices = stripe.Price.list(product=product_id, active=True, limit=10)
+            for p in prices.data:
+                if p.unit_amount == amount and p.recurring and p.recurring.interval == "month":
+                    return p.id
+            price = stripe.Price.create(
+                product=product_id,
+                unit_amount=amount,
+                currency="usd",
+                recurring={"interval": "month"},
+                nickname=nickname,
+            )
+            logger.info(f"Created Stripe price {nickname}: {price.id}")
+            return price.id
+
+        STRIPE_PRICES["pro"] = get_or_create_price(pro_product.id, 2900, "Pro Monthly")
+        STRIPE_PRICES["enterprise"] = get_or_create_price(enterprise_product.id, 9900, "Enterprise Monthly")
+        logger.info(f"Stripe prices ready: {STRIPE_PRICES}")
+
+    except Exception as e:
+        logger.error(f"Stripe setup error: {e}")
+
+
+# ─────────────────────────────────────────────
+# App Lifespan
+# ─────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Neural Command API starting up…")
+    await setup_stripe_products()
+    logger.info("Startup complete. Server ready.")
+    yield
+    logger.info("Neural Command API shutting down.")
+
+
+# ─────────────────────────────────────────────
+# FastAPI App
+# ─────────────────────────────────────────────
+
+app = FastAPI(
+    title="Neural Command API",
+    version="1.0.0",
+    description="Production backend for the Neural Command AI agent SaaS platform",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ─────────────────────────────────────────────
+# Pydantic Models
+# ─────────────────────────────────────────────
+
+class SignupRequest(BaseModel):
+    email: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+class ProfileUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+
+
+class AgentCreateRequest(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    template_id: Optional[str] = "custom"
+    model: Optional[str] = "gpt-4o-mini"
+    temperature: Optional[float] = 0.7
+    max_tokens: Optional[int] = 1024
+    system_prompt: Optional[str] = None
+    goals: Optional[list] = []
+    schedule: Optional[str] = None
+    rules: Optional[list] = []
+
+
+class AgentUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    status: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    system_prompt: Optional[str] = None
+    goals: Optional[list] = None
+    schedule: Optional[str] = None
+    rules: Optional[list] = None
+
+
+class AgentRunRequest(BaseModel):
+    input_data: dict  # must contain "message" key
+
+
+class ConnectionRequest(BaseModel):
+    service: str
+    credentials: dict
+
+
+class CheckoutRequest(BaseModel):
+    plan: str  # "pro" or "enterprise"
+    success_url: Optional[str] = "https://neuralcommand.app/dashboard?upgraded=true"
+    cancel_url: Optional[str] = "https://neuralcommand.app/pricing"
+
+
+class WaitlistRequest(BaseModel):
+    email: str
+
+
+# ─────────────────────────────────────────────
+# AUTH ENDPOINTS
+# ─────────────────────────────────────────────
+
+@app.post("/api/auth/signup")
+async def auth_signup(body: SignupRequest):
+    """Register a new user via Supabase Auth."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{SUPABASE_URL}/auth/v1/signup",
+                headers={"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+                json={
+                    "email": body.email,
+                    "password": body.password,
+                    "data": {"display_name": body.display_name or body.email.split("@")[0]},
+                },
+            )
+            if r.status_code not in (200, 201):
+                detail = r.json().get("msg") or r.json().get("error_description") or "Signup failed"
+                raise HTTPException(status_code=r.status_code, detail=detail)
+            data = r.json()
+
+        return {
+            "user": data.get("user"),
+            "session": data.get("session"),
+            "message": "Signup successful. Check your email to confirm your account." if not data.get("session") else "Signup successful.",
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Signup error: {e}")
+        raise HTTPException(status_code=500, detail="Signup failed")
+
+
+@app.post("/api/auth/login")
+async def auth_login(body: LoginRequest):
+    """Login via Supabase Auth password grant."""
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.post(
+                f"{SUPABASE_URL}/auth/v1/token?grant_type=password",
+                headers={"apikey": SUPABASE_ANON_KEY, "Content-Type": "application/json"},
+                json={"email": body.email, "password": body.password},
+            )
+            if r.status_code != 200:
+                detail = r.json().get("error_description") or r.json().get("msg") or "Login failed"
+                raise HTTPException(status_code=401, detail=detail)
+            return r.json()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Login error: {e}")
+        raise HTTPException(status_code=500, detail="Login failed")
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(user: dict = Depends(get_current_user)):
+    """Logout current session."""
+    token = user["_token"]
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            await client.post(
+                f"{SUPABASE_URL}/auth/v1/logout",
+                headers={
+                    "apikey": SUPABASE_ANON_KEY,
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                },
+            )
+        return {"message": "Logged out successfully"}
+    except Exception as e:
+        logger.error(f"Logout error: {e}")
+        return {"message": "Logged out"}
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        if rows:
+            return rows[0]
+        return {"id": user_id, "email": user.get("email")}
+    except Exception as e:
+        logger.error(f"auth/me error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch profile")
+
+
+# ─────────────────────────────────────────────
+# PROFILE ENDPOINTS
+# ─────────────────────────────────────────────
+
+@app.get("/api/profile")
+async def get_profile(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        if not rows:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"get_profile error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch profile")
+
+
+@app.patch("/api/profile")
+async def update_profile(body: ProfileUpdateRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    update_data: dict = {}
+    if body.display_name is not None:
+        update_data["display_name"] = body.display_name
+    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        rows = await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data=update_data)
+        return rows[0] if rows else {"message": "Updated"}
+    except Exception as e:
+        logger.error(f"update_profile error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update profile")
+
+
+# ─────────────────────────────────────────────
+# AGENTS CRUD
+# ─────────────────────────────────────────────
+
+@app.get("/api/agents")
+async def list_agents(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        agents = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "order": "created_at.desc"})
+        return agents or []
+    except Exception as e:
+        logger.error(f"list_agents error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list agents")
+
+
+@app.post("/api/agents", status_code=201)
+async def create_agent(body: AgentCreateRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile = profile_rows[0] if profile_rows else {}
+        agents_limit = profile.get("agents_limit", 3)
+        agents_count_rows = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "select": "id"})
+        current_count = len(agents_count_rows or [])
+        if current_count >= agents_limit:
+            raise HTTPException(status_code=403, detail=f"Agent limit reached ({agents_limit}). Upgrade your plan.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"create_agent limit check error: {e}")
+
+    system_prompt = body.system_prompt
+    if not system_prompt:
+        system_prompt = TEMPLATE_PROMPTS.get(body.template_id or "custom", TEMPLATE_PROMPTS["custom"])
+
+    now = datetime.now(timezone.utc).isoformat()
+    agent_data = {
+        "user_id": user_id,
+        "name": body.name,
+        "description": body.description or "",
+        "template_id": body.template_id or "custom",
+        "status": "active",
+        "model": body.model or "gpt-4o-mini",
+        "temperature": body.temperature if body.temperature is not None else 0.7,
+        "max_tokens": body.max_tokens or 1024,
+        "system_prompt": system_prompt,
+        "goals": body.goals or [],
+        "schedule": body.schedule,
+        "rules": body.rules or [],
+        "total_runs": 0,
+        "total_tokens_used": 0,
+        "created_at": now,
+        "updated_at": now,
+    }
+    try:
+        result = await sb_post("/rest/v1/agents", agent_data)
+        return result[0] if isinstance(result, list) else result
+    except Exception as e:
+        logger.error(f"create_agent error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create agent")
+
+
+@app.get("/api/agents/{agent_id}")
+async def get_agent(agent_id: str, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        if not rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch agent")
+
+
+@app.patch("/api/agents/{agent_id}")
+async def update_agent(agent_id: str, body: AgentUpdateRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        if not rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to verify agent ownership")
+
+    update_data: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    for field in ["name", "description", "status", "model", "temperature", "max_tokens", "system_prompt", "goals", "schedule", "rules"]:
+        val = getattr(body, field, None)
+        if val is not None:
+            update_data[field] = val
+    try:
+        result = await sb_patch("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"}, data=update_data)
+        return result[0] if isinstance(result, list) and result else {"message": "Updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to update agent")
+
+
+@app.delete("/api/agents/{agent_id}")
+async def delete_agent(agent_id: str, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        if not rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to verify ownership")
+    try:
+        await sb_delete("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}"})
+        return {"message": "Agent deleted successfully"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to delete agent")
+
+
+# ─────────────────────────────────────────────
+# AGENT EXECUTION
+# ─────────────────────────────────────────────
+
+@app.post("/api/agents/{agent_id}/run")
+async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    started_at = datetime.now(timezone.utc)
+    t0 = time.monotonic()
+
+    try:
+        agent_rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        agent = agent_rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to load agent config")
+
+    try:
+        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile = profile_rows[0] if profile_rows else {}
+        calls_this_month = profile.get("api_calls_this_month", 0) or 0
+        calls_limit = profile.get("api_calls_limit", 100) or 100
+        if calls_this_month >= calls_limit:
+            raise HTTPException(status_code=429, detail=f"API call limit reached ({calls_limit}/month). Upgrade your plan.")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"run_agent limit check error: {e}")
+
+    template_id = agent.get("template_id", "custom")
+    system_prompt = TEMPLATE_PROMPTS.get(template_id, TEMPLATE_PROMPTS["custom"])
+    if agent.get("system_prompt"):
+        system_prompt = agent["system_prompt"]
+
+    goals = agent.get("goals") or []
+    if goals:
+        system_prompt += f"\n\nYour current goals:\n" + "\n".join(f"- {g}" for g in goals)
+
+    model = agent.get("model", "gpt-4o-mini")
+    temperature = agent.get("temperature", 0.7)
+    max_tokens = agent.get("max_tokens", 1024)
+    user_message = body.input_data.get("message", "")
+
+    if not user_message:
+        raise HTTPException(status_code=400, detail="input_data.message is required")
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_message},
+    ]
+
+    run_id = None
+    try:
+        now_iso = started_at.isoformat()
+        run_insert = await sb_post("/rest/v1/agent_runs", {
+            "agent_id": agent_id,
+            "user_id": user_id,
+            "status": "running",
+            "input_data": body.input_data,
+            "model": model,
+            "started_at": now_iso,
+        })
+        if isinstance(run_insert, list) and run_insert:
+            run_id = run_insert[0]["id"]
+        elif isinstance(run_insert, dict):
+            run_id = run_insert.get("id")
+    except Exception as e:
+        logger.warning(f"run_agent: failed to insert run record: {e}")
+
+    try:
+        completion = await openai_client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except openai.RateLimitError:
+        raise HTTPException(status_code=429, detail="OpenAI rate limit exceeded. Try again shortly.")
+    except openai.AuthenticationError:
+        raise HTTPException(status_code=500, detail="OpenAI configuration error")
+    except Exception as e:
+        logger.error(f"OpenAI call error: {e}")
+        raise HTTPException(status_code=500, detail="AI execution failed")
+
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    response_text = completion.choices[0].message.content
+    prompt_tokens = completion.usage.prompt_tokens
+    completion_tokens = completion.usage.completion_tokens
+    total_tokens = completion.usage.total_tokens
+    cost_usd, price_usd = calculate_cost(model, prompt_tokens, completion_tokens)
+    completed_at = datetime.now(timezone.utc).isoformat()
+    output_data = {"response": response_text, "model": model, "finish_reason": completion.choices[0].finish_reason}
+
+    try:
+        if run_id:
+            await sb_patch("/rest/v1/agent_runs", params={"id": f"eq.{run_id}"}, data={
+                "status": "completed", "output_data": output_data,
+                "prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens, "cost_usd": cost_usd,
+                "completed_at": completed_at, "duration_ms": duration_ms,
+            })
+        await sb_post("/rest/v1/usage_records", {
+            "user_id": user_id, "agent_id": agent_id, "run_id": run_id,
+            "tokens_used": total_tokens, "cost_usd": cost_usd, "price_usd": price_usd,
+            "model": model, "created_at": completed_at,
+        })
+        new_calls = (profile.get("api_calls_this_month") or 0) + 1
+        await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data={"api_calls_this_month": new_calls})
+        await sb_patch("/rest/v1/agents", params={"id": f"eq.{agent_id}"}, data={
+            "last_run_at": completed_at,
+            "total_runs": (agent.get("total_runs") or 0) + 1,
+            "total_tokens_used": (agent.get("total_tokens_used") or 0) + total_tokens,
+        })
+    except Exception as e:
+        logger.error(f"run_agent DB update error: {e}")
+
+    return {
+        "run_id": run_id, "status": "completed", "output": output_data,
+        "usage": {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens,
+                  "total_tokens": total_tokens, "cost_usd": cost_usd, "price_usd": price_usd},
+        "duration_ms": duration_ms,
+    }
+
+
+@app.get("/api/agents/{agent_id}/runs")
+async def get_agent_runs(agent_id: str, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        agent_rows = await sb_get("/rest/v1/agents", params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"})
+        if not agent_rows:
+            raise HTTPException(status_code=404, detail="Agent not found")
+        runs = await sb_get("/rest/v1/agent_runs", params={
+            "agent_id": f"eq.{agent_id}", "user_id": f"eq.{user_id}",
+            "order": "started_at.desc", "limit": "50",
+        })
+        return runs or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch runs")
+
+
+# ─────────────────────────────────────────────
+# TEMPLATES
+# ─────────────────────────────────────────────
+
+@app.get("/api/templates")
+async def list_templates():
+    return TEMPLATES
+
+
+# ─────────────────────────────────────────────
+# CONNECTIONS
+# ─────────────────────────────────────────────
+
+@app.get("/api/connections")
+async def list_connections(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        rows = await sb_get("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "order": "created_at.desc"})
+        connections = []
+        for row in (rows or []):
+            row_copy = dict(row)
+            if row_copy.get("credentials"):
+                row_copy["credentials"] = {"masked": True}
+            connections.append(row_copy)
+        return connections
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to list connections")
+
+
+@app.post("/api/connections", status_code=201)
+async def create_connection(body: ConnectionRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        existing = await sb_get("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}", "limit": "1"})
+        if existing:
+            result = await sb_patch("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{body.service}"}, data={"credentials": body.credentials, "is_active": True, "last_tested_at": now, "updated_at": now})
+        else:
+            result = await sb_post("/rest/v1/connections", {"user_id": user_id, "service": body.service, "credentials": body.credentials, "is_active": True, "last_tested_at": now, "created_at": now, "updated_at": now})
+        return {"message": "Connection saved", "service": body.service}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to save connection")
+
+
+@app.delete("/api/connections/{service}")
+async def delete_connection(service: str, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        await sb_delete("/rest/v1/connections", params={"user_id": f"eq.{user_id}", "service": f"eq.{service}"})
+        return {"message": f"Connection '{service}' removed"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to delete connection")
+
+
+# ─────────────────────────────────────────────
+# DASHBOARD STATS
+# ─────────────────────────────────────────────
+
+@app.get("/api/dashboard")
+async def get_dashboard(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        agents = await sb_get("/rest/v1/agents", params={"user_id": f"eq.{user_id}", "select": "id,status"})
+        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        recent_runs = await sb_get("/rest/v1/agent_runs", params={"user_id": f"eq.{user_id}", "order": "started_at.desc", "limit": "5"})
+        profile = profile_rows[0] if profile_rows else {}
+        agents = agents or []
+        active_count = sum(1 for a in agents if a.get("status") == "active")
+        return {
+            "total_agents": len(agents), "active_agents": active_count,
+            "api_calls_this_month": profile.get("api_calls_this_month", 0),
+            "api_calls_limit": profile.get("api_calls_limit", 100),
+            "current_plan": profile.get("plan", "free"),
+            "recent_runs": recent_runs or [],
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch dashboard data")
+
+
+# ─────────────────────────────────────────────
+# USAGE & BILLING
+# ─────────────────────────────────────────────
+
+@app.get("/api/usage")
+async def get_usage(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    now = datetime.now(timezone.utc)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat()
+    try:
+        records = await sb_get("/rest/v1/usage_records", params={"user_id": f"eq.{user_id}", "created_at": f"gte.{month_start}", "order": "created_at.desc", "limit": "500"})
+        records = records or []
+        return {
+            "period": {"start": month_start, "end": now.isoformat()},
+            "records": records,
+            "summary": {"total_calls": len(records), "total_tokens": sum(r.get("tokens_used", 0) for r in records), "total_cost_usd": round(sum(r.get("cost_usd", 0) for r in records), 6)},
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to fetch usage")
+
+
+@app.post("/api/billing/create-checkout")
+async def create_checkout(body: CheckoutRequest, user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    plan = body.plan.lower()
+    if plan not in STRIPE_PRICES:
+        raise HTTPException(status_code=400, detail=f"Invalid plan '{plan}'. Choose 'pro' or 'enterprise'.")
+    price_id = STRIPE_PRICES[plan]
+    try:
+        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile = profile_rows[0] if profile_rows else {}
+        stripe_customer_id = profile.get("stripe_customer_id")
+        if not stripe_customer_id:
+            customer = stripe.Customer.create(email=user.get("email", ""), metadata={"supabase_user_id": user_id})
+            stripe_customer_id = customer.id
+            await sb_patch("/rest/v1/profiles", params={"id": f"eq.{user_id}"}, data={"stripe_customer_id": stripe_customer_id})
+        session = stripe.checkout.Session.create(
+            customer=stripe_customer_id, payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}], mode="subscription",
+            success_url=body.success_url, cancel_url=body.cancel_url,
+            metadata={"supabase_user_id": user_id, "plan": plan},
+        )
+        return {"checkout_url": session.url, "session_id": session.id}
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=500, detail=f"Stripe error: {e.user_message}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to create checkout session")
+
+
+@app.post("/api/billing/webhook")
+async def stripe_webhook(request: Request):
+    body_bytes = await request.body()
+    try:
+        import json as _json
+        event_data = _json.loads(body_bytes)
+        event_type = event_data.get("type")
+    except Exception as e:
+        return JSONResponse({"error": "Invalid payload"}, status_code=400)
+
+    if event_type == "checkout.session.completed":
+        session_obj = event_data.get("data", {}).get("object", {})
+        supabase_user_id = session_obj.get("metadata", {}).get("supabase_user_id")
+        plan = session_obj.get("metadata", {}).get("plan", "pro")
+        subscription_id = session_obj.get("subscription")
+        if supabase_user_id:
+            plan_limits = {"pro": {"api_calls_limit": 500, "agents_limit": 10}, "enterprise": {"api_calls_limit": 999999, "agents_limit": 999}}
+            limits = plan_limits.get(plan, plan_limits["pro"])
+            try:
+                await sb_patch("/rest/v1/profiles", params={"id": f"eq.{supabase_user_id}"}, data={"plan": plan, "stripe_subscription_id": subscription_id, **limits})
+            except Exception as e:
+                logger.error(f"Webhook profile update error: {e}")
+    return {"received": True}
+
+
+@app.get("/api/billing/portal")
+async def billing_portal(user: dict = Depends(get_current_user)):
+    user_id = user["id"]
+    try:
+        profile_rows = await sb_get("/rest/v1/profiles", params={"id": f"eq.{user_id}", "limit": "1"})
+        profile = profile_rows[0] if profile_rows else {}
+        stripe_customer_id = profile.get("stripe_customer_id")
+        if not stripe_customer_id:
+            raise HTTPException(status_code=400, detail="No billing account found.")
+        portal = stripe.billing_portal.Session.create(customer=stripe_customer_id, return_url="https://neuralcommand.app/dashboard")
+        return {"portal_url": portal.url}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to create billing portal session")
+
+
+# ─────────────────────────────────────────────
+# WAITLIST
+# ─────────────────────────────────────────────
+
+@app.post("/api/waitlist", status_code=201)
+async def join_waitlist(body: WaitlistRequest):
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{SUPABASE_URL}/rest/v1/waitlist", headers={**sb_headers_service(), "Prefer": "return=minimal,resolution=ignore-duplicates", "on_conflict": "email"}, json={"email": body.email, "created_at": datetime.now(timezone.utc).isoformat()})
+            if r.status_code in (200, 201, 204):
+                return {"message": "You've been added to the waitlist!"}
+            if r.status_code == 409:
+                return {"message": "You're already on the waitlist."}
+            raise HTTPException(status_code=500, detail="Failed to join waitlist")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to join waitlist")
+
+
+# ─────────────────────────────────────────────
+# HEALTH CHECK
+# ─────────────────────────────────────────────
+
+@app.get("/api/health")
+async def health_check():
+    return {"status": "ok", "service": "Neural Command API", "version": "1.0.0", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+
+# ─────────────────────────────────────────────
+# Static Frontend
+# ─────────────────────────────────────────────
+
+import pathlib
+
+STATIC_DIR = pathlib.Path(__file__).parent / "static"
+if STATIC_DIR.exists():
+    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        file_path = STATIC_DIR / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(STATIC_DIR / "index.html"))
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
