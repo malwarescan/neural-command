@@ -1,0 +1,162 @@
+    </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(239,68,68,0.1);color:#ef4444"><i data-lucide="clock" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value" id="recency-eligibility-val">&mdash;</div>
+            <div class="cc-kpi-label">Recency Eligibility</div>
+            <div class="cc-kpi-delta cc-delta-neutral">7 / 30 / 365-day windows</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.08);color:#00c8ff"><i data-lucide="activity" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value" id="retrieval-prob-val">&mdash;</div>
+            <div class="cc-kpi-label">Retrieval Probability</div>
+            <div class="cc-kpi-delta cc-delta-neutral">composite signal score</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3 class="card-title">Run Fan-Out Analysis</h3></div>
+        <div style="padding:4px 0">
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Topic</label>
+              <input type="text" class="form-input" id="fanout-topic" placeholder="e.g., domain registration, content marketing">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Brand / Entity</label>
+              <input type="text" class="form-input" id="fanout-entity" placeholder="e.g., NameSilo, Croutons Agents">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:12px">
+            <label class="form-label">Seed Prompts (optional, one per line)</label>
+            <textarea class="form-textarea" id="fanout-seeds" rows="3" placeholder="how do I register a domain&#10;best domain registrar 2025&#10;cheapest domain names"></textarea>
+          </div>
+          <div style="margin-bottom:12px">
+            <label class="form-label">Verticals</label>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px">
+              ${['web','shopping','maps','news','images'].map(v => `<label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer"><input type="checkbox" value="${v}" class="fanout-vertical-cb" checked> ${v}</label>`).join('')}
+            </div>
+          </div>
+          <button class="btn btn-primary" id="run-fanout-btn" style="min-width:160px">
+            <i data-lucide="git-branch" style="width:14px;height:14px"></i>
+            Run Fan-Out Analysis
+          </button>
+        </div>
+      </div>
+
+      <div id="fanout-results" style="display:none">
+        <div class="cc-grid-2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Prompt Cluster</h3><span class="cc-section-badge cc-badge-purple" id="cluster-count-badge">0 queries</span></div>
+            <div id="fanout-cluster-list" style="max-height:300px;overflow-y:auto;padding:4px 0"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Coverage by Vertical</h3></div>
+            <div id="fanout-coverage-bars" style="padding:4px 0"></div>
+          </div>
+        </div>
+        <div class="cc-grid-2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Fan-Out Queries with Recency Tags</h3></div>
+            <div id="fanout-queries-table" style="max-height:300px;overflow-y:auto"></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Gap Analysis</h3></div>
+            <div id="fanout-gap-analysis" style="padding:4px 0"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Recommended Croutons to Build</h3></div>
+          <div id="fanout-recommended-croutons" style="padding:4px 0"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3 class="card-title">AI Search Architecture Reference</h3></div>
+        <div style="padding:4px 0">
+          <div class="cc-info-grid">
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">Sonic Classifier &amp; Fan-Out Engine</h4>
+              <p class="text-sm">ChatGPT's Sonic Classifier fires before generation and determines if fresh web retrieval is needed (search threshold: ~65%). Standard mode fires 1-3 parallel queries. Thinking/Deep Search mode fires 10-30+ recursive fan-outs via SerpAPI. Results are merged via Reciprocal Rank Fusion (RRF).</p>
+            </div>
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">Recency Filters (7 / 30 / 365 days)</h4>
+              <p class="text-sm">ChatGPT applies three recency windows: 7 days (breaking news), 30 days (general news), 365 days (established topics). Content without a machine-readable <code>dateModified</code> in JSON-LD is deprioritized. Always set <code>dateModified</code> in schema on every content update.</p>
+            </div>
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">Providers Ecosystem</h4>
+              <p class="text-sm">ChatGPT uses SerpAPI (Google) for web, SearchAPI.io for Shopping (Mercury pipeline), Labrador/Bright for images. Copilot uses Bing directly. Perplexity uses Bing as primary provider. Submit sitemaps to both Google and Bing Webmaster Tools separately.</p>
+            </div>
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">Retrieval Probability Formula</h4>
+              <p class="text-sm"><code>retrieval_probability = FanOutCoverage x RetrievalAdvantage x EntityAuthority x RetrievalSurfaceCount</code>. All factors are multiplicative. A score of 0 on any single factor produces a composite score of 0. Optimize all four dimensions simultaneously.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+
+    document.getElementById('run-fanout-btn')?.addEventListener('click', async () => {
+      const topic = document.getElementById('fanout-topic')?.value?.trim();
+      const entity = document.getElementById('fanout-entity')?.value?.trim();
+      if (!topic || !entity) { toast('Topic and Entity are required', 'error'); return; }
+
+      const verticals = Array.from(document.querySelectorAll('.fanout-vertical-cb:checked')).map(cb => cb.value);
+      const seedsRaw = document.getElementById('fanout-seeds')?.value?.trim();
+      const seedPrompts = seedsRaw ? seedsRaw.split('\n').filter(s => s.trim()) : [];
+
+      const btn = document.getElementById('run-fanout-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" style="width:14px;height:14px"></i> Analyzing...';
+      lucide.createIcons();
+
+      try {
+        const data = await apiFetch('/api/fanout-intelligence', {
+          method: 'POST',
+          body: JSON.stringify({ topic, entity, seed_prompts: seedPrompts, verticals }),
+        });
+
+        // Update KPI cards
+        const overall = data.coverage_estimate?.overall || 0;
+        document.getElementById('fanout-coverage-val').textContent = (overall * 100).toFixed(1) + '%';
+        document.getElementById('surface-count-val').textContent = (data.recommended_croutons?.length || 0) + ' gaps';
+
+        // Prompt cluster
+        const cluster = data.prompt_cluster || [];
+        document.getElementById('cluster-count-badge').textContent = cluster.length + ' queries';
+        const clusterList = document.getElementById('fanout-cluster-list');
+        clusterList.innerHTML = cluster.map((q, i) => `
+          <div style="display:flex;align-items:flex-start;gap:8px;padding:6px 0;border-bottom:1px solid var(--color-border);">
+            <span style="font-size:11px;color:var(--color-text-muted);min-width:24px;text-align:right">${i+1}</span>
+            <span style="font-size:13px;color:var(--color-text)">${escapeHtml(q)}</span>
+          </div>`).join('');
+
+        // Coverage bars
+        const cov = data.coverage_estimate || {};
+        const covBars = document.getElementById('fanout-coverage-bars');
+        covBars.innerHTML = Object.entries(cov).filter(([k]) => k !== 'overall').map(([vertical, score]) => {
+          const pct = Math.round((score || 0) * 100);
+          const color = pct >= 75 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444';
+          return `<div style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;margin-bottom:3px">
+              <span style="font-size:12px;text-transform:capitalize;color:var(--color-text)">${vertical}</span>
+              <span style="font-size:12px;color:${color};font-weight:600">${pct}%</span>
+            </div>
+            <div style="height:6px;background:var(--color-border);border-radius:3px">
+              <div style="height:6px;background:${color};border-radius:3px;width:${pct}%"></div>
+            </div>
+          </div>`;
+        }).join('') + `<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--color-border);display:flex;justify-content:space-between">
+            <span style="font-size:12px;font-weight:600;color:var(--color-text)">Overall Coverage</span>
+            <span style="font-size:14px;font-weight:700;color:${(cov.overall||0) >= 0.75 ? '#10b981' : '#f59e0b'}">${Math.round((cov.overall||0)*100)}%</span>
+          </div>`;
+
+        // Fan-out queries table
+        const queries = data.fanout_queries || [];
+        const queriesTable = document.getElementById('fanout-queries-table');
+        queriesTable.innerHTML = `<table class="cc-table"><thead><tr><th>Query</th><th>Vertical</th><th>Recency</th><th>Prob.</th></tr></t
