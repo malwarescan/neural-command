@@ -1,4 +1,20 @@
+r"></div></div>`;
+    try {
+      const data = await apiFetch('/api/dashboard');
+      const plan = data.current_plan || 'free';
+      const callsPct = data.api_calls_limit > 0 ? Math.min((data.api_calls_this_month / data.api_calls_limit) * 100, 100) : 0;
+      const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
 
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Overview of your AI agents and usage</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Agents</div>
+            <div class="kpi-value">${data.total_agents}</div>
             <div class="kpi-meta">${data.active_agents} active</div>
           </div>
           <div class="kpi-card">
@@ -194,9 +210,4 @@
           </div>
         </div>
 
-        <div class="card" style="margin-top:16px">
-          <div class="card-header"><h3 class="card-title">Quick Navigation</h3></div>
-          <div class="cc-quick-nav">
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=seo]').click()"><i data-lucide="search" style="width:16px;height:16px"></i>SEO Metrics</button>
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=ai-visibility]').click()"><i data-lucide="eye" style="width:16px;height:16px"></i>AI Visibility</button>
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=llm-conversions]').click()"><i data-lucide="trending-up" style="width:16px;height:16px"></i>LLM Conversions</button>
+        <div class="card" style="margin-top:16p
