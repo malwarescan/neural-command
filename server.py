@@ -1,4 +1,4 @@
-"""Middleware to patch app.js responses. Self-contained, no api_server.py changes needed.
+"""Middleware to patch app.js and index.html responses. Self-contained, no api_server.py changes needed.
 Import via Procfile: uvicorn server:app"""
 import pathlib, logging, re
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -6,25 +6,108 @@ from starlette.responses import Response
 
 logger = logging.getLogger("uvicorn.error")
 
-# Load and patch app.js at import time
-_PATCHED = None
+# ── Safe Lucide wrapper: retries every 100ms for 5s if lucide not loaded yet ──
+_SAFE_CREATE = (
+    '(function(){'
+    'if(typeof lucide!=="undefined"&&lucide.createIcons){lucide.createIcons()}'
+    'else{var _t=setInterval(function(){'
+    'if(typeof lucide!=="undefined"&&lucide.createIcons){clearInterval(_t);lucide.createIcons()}'
+    '},100);setTimeout(function(){clearInterval(_t)},5000)}'
+    '})()'
+)
+
+# ── Patch app.js at import time ──
+_PATCHED_JS = None
 _appjs = pathlib.Path(__file__).parent / "static" / "app.js"
 if _appjs.exists():
     _c = _appjs.read_text(encoding="utf-8")
-    _old = '<div class="template-card-icon">${t.icon}</div>'
-    _new = '<div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>'
-    if _old in _c:
-        _c = _c.replace(_old, _new)
-    _PATCHED = _c
-    logger.info(f"appjs_patches: loaded ({len(_c)} bytes)")
+    _patches = 0
+
+    # Patch 1: Wrap raw ${t.icon} in Lucide <i> tags for template cards
+    _old_icon = '<div class="template-card-icon">${t.icon}</div>'
+    _new_icon = '<div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>'
+    if _old_icon in _c:
+        n = _c.count(_old_icon)
+        _c = _c.replace(_old_icon, _new_icon)
+        _patches += n
+        logger.info(f"appjs_patches: wrapped {n} template-card-icon tags")
+
+    # Patch 2a: Replace bare lucide.createIcons(); with safe version
+    _bare = "lucide.createIcons();"
+    if _bare in _c:
+        n = _c.count(_bare)
+        _c = _c.replace(_bare, _SAFE_CREATE + ";")
+        _patches += n
+        logger.info(f"appjs_patches: made {n} bare createIcons() calls safe")
+
+    # Patch 2b: Replace lucide.createIcons({...}) with safe version
+    _param_pattern = r'lucide\.createIcons\(\{([^}]+)\}\)'
+    n = len(re.findall(_param_pattern, _c))
+    if n:
+        _c = re.sub(
+            _param_pattern,
+            r'(function(){if(typeof lucide!=="undefined"&&lucide.createIcons){lucide.createIcons({\1})}})() ',
+            _c,
+        )
+        _patches += n
+        logger.info(f"appjs_patches: made {n} parameterized createIcons() calls safe")
+
+    # Patch 2c: Replace requestAnimationFrame(() => lucide.createIcons()) with safe version
+    _raf_pattern = r'requestAnimationFrame\(\(\)\s*=>\s*lucide\.createIcons\(\)\)'
+    n = len(re.findall(_raf_pattern, _c))
+    if n:
+        _c = re.sub(_raf_pattern, f'requestAnimationFrame(function(){{{_SAFE_CREATE}}})', _c)
+        _patches += n
+        logger.info(f"appjs_patches: made {n} rAF createIcons() calls safe")
+
+    _PATCHED_JS = _c
+    logger.info(f"appjs_patches: total {_patches} patches applied ({len(_c)} bytes)")
+
+# ── Patch index.html at import time ──
+_PATCHED_HTML = None
+_indexhtml = pathlib.Path(__file__).parent / "static" / "index.html"
+if _indexhtml.exists():
+    _h = _indexhtml.read_text(encoding="utf-8")
+
+    # Pin Lucide version (avoid @latest redirect) and add preconnect
+    _h = _h.replace(
+        '<script src="https://unpkg.com/lucide@latest"></script>',
+        '<link rel="preconnect" href="https://unpkg.com" crossorigin>\n'
+        '  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>',
+    )
+
+    _PATCHED_HTML = _h
+    logger.info("html_patches: pinned Lucide version in index.html")
 
 
-class AppJSPatchMiddleware(BaseHTTPMiddleware):
+class PatchMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        if _PATCHED and request.url.path == "/static/app.js":
-            return Response(content=_PATCHED, media_type="application/javascript",
-                          headers={"Cache-Control": "public, max-age=3600"})
+        path = request.url.path
+        # Intercept app.js
+        if _PATCHED_JS and path == "/static/app.js":
+            return Response(
+                content=_PATCHED_JS,
+                media_type="application/javascript",
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
+        # Intercept index.html (root or explicit)
+        if _PATCHED_HTML and path in ("/", "/index.html"):
+            return Response(
+                content=_PATCHED_HTML,
+                media_type="text/html",
+                headers={"Cache-Control": "no-cache, must-revalidate"},
+            )
         response = await call_next(request)
+        # Also intercept SPA catch-all responses that serve index.html
+        # (These are non-API, non-static routes that return index.html for client-side routing)
+        if _PATCHED_HTML and not path.startswith("/api/") and not path.startswith("/static/"):
+            ct = response.headers.get("content-type", "")
+            if "text/html" in ct:
+                return Response(
+                    content=_PATCHED_HTML,
+                    media_type="text/html",
+                    headers={"Cache-Control": "no-cache, must-revalidate"},
+                )
         return response
 
 
@@ -47,4 +130,4 @@ try:
 except Exception as e:
     logger.warning(f"Could not fix template icons: {e}")
 
-app.add_middleware(AppJSPatchMiddleware)
+app.add_middleware(PatchMiddleware)
