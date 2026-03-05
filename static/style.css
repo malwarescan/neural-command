@@ -280,7 +280,7 @@
   grid-column: 2;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: var(--space-6);
+  padding: var(--space-8);
   background: var(--color-bg);
 }
 
@@ -289,7 +289,7 @@
 }
 
 .page-header {
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-8);
 }
 
 .page-title {
@@ -442,7 +442,7 @@
 }
 
 /* ── GRID LAYOUTS ───────────────────────────── */
-.grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-4); }
+.grid-2 { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--space-4); }
 .grid-3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
 
 /* ── BADGES ─────────────────────────────────── */
@@ -1143,25 +1143,27 @@
   background: var(--color-surface);
   border-radius: var(--radius-xl);
   border: 1px solid var(--color-border);
-  padding: var(--space-5);
+  padding: var(--space-6);
   display: flex;
   align-items: center;
   gap: var(--space-4);
 }
 
 .connection-icon {
-  width: 44px;
-  height: 44px;
+  width: 48px;
+  height: 48px;
   border-radius: var(--radius-lg);
   background: var(--color-surface-2);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  font-size: 20px;
+  font-size: 22px;
 }
 
 .connection-info { flex: 1; min-width: 0; }
+
+.connection-desc { margin-top: 6px; font-size: 12px; color: var(--color-text-muted); line-height: 1.4; }
 
 .connection-name {
   font-size: 14px;
@@ -1544,7 +1546,7 @@
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  padding: 16px;
+  padding: 20px;
 }
 .cc-kpi-compact {
   flex-direction: column;
