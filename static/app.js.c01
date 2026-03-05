@@ -226,22 +226,4 @@
             <input type="password" class="form-input" id="signup-password" placeholder="Min. 6 characters" required minlength="6">
           </div>
           <button type="submit" class="btn btn-primary btn-lg" id="signup-btn">Create Account</button>
-        </form>
-        <div class="auth-links">
-          Already have an account? <a href="#/login">Sign in</a>
-        </div>
-      </div>`;
-  }
-
-  function forgotView() {
-    return `
-      <div class="auth-card">
-        <div class="auth-logo">
-          <div class="auth-logo-icon">${LOGO_SVG}</div>
-          <div class="auth-logo-text">Croutons Agents</div>
-        </div>
-        <h1 class="auth-title">Reset your password</h1>
-        <p class="auth-subtitle">Enter your email and we'll send a reset link</p>
-        <div id="auth-error"></div>
-        <div id="auth-success"></div>
-        <form class="auth-form" id="forgot-form">
+     
