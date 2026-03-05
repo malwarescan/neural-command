@@ -1,0 +1,165 @@
+head><tbody>` +
+          queries.map(q => `<tr>
+            <td style="font-size:12px">${escapeHtml(q.query || '')}</td>
+            <td><span style="font-size:11px;text-transform:capitalize">${q.vertical || 'web'}</span></td>
+            <td><span class="tag" style="font-size:10px">${q.recency_tag || 'none'}</span></td>
+            <td style="font-size:12px">${((q.retrieval_probability || 0)*100).toFixed(0)}%</td>
+          </tr>`).join('') + `</tbody></table>`;
+
+        // Gap analysis
+        const gap = data.gap_analysis || {};
+        const gapEl = document.getElementById('fanout-gap-analysis');
+        gapEl.innerHTML = `
+          <div style="margin-bottom:12px">
+            <div style="font-size:12px;font-weight:600;color:var(--color-text);margin-bottom:6px">Uncovered Topics</div>
+            ${(gap.uncovered_topics || []).map(t => `<div class="cc-activity-item" style="padding:4px 0;border-bottom:1px solid var(--color-border)"><i data-lucide="minus-circle" style="width:12px;height:12px;color:#ef4444;flex-shrink:0"></i><span style="font-size:12px">${escapeHtml(t)}</span></div>`).join('')}
+          </div>
+          <div style="margin-bottom:12px">
+            <div style="font-size:12px;font-weight:600;color:var(--color-text);margin-bottom:6px">Priority Gaps</div>
+            ${(gap.priority_gaps || []).map(g => `<div class="cc-activity-item" style="padding:4px 0;border-bottom:1px solid var(--color-border)"><i data-lucide="alert-triangle" style="width:12px;height:12px;color:#f59e0b;flex-shrink:0"></i><span style="font-size:12px">${escapeHtml(g)}</span></div>`).join('')}
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;color:var(--color-text);margin-bottom:6px">Recommended Content</div>
+            ${(gap.recommended_content || []).map(r => `<div class="cc-activity-item" style="padding:4px 0;border-bottom:1px solid var(--color-border)"><i data-lucide="plus-circle" style="width:12px;height:12px;color:#10b981;flex-shrink:0"></i><span style="font-size:12px">${escapeHtml(r)}</span></div>`).join('')}
+          </div>`;
+        lucide.createIcons({ nodes: [gapEl] });
+
+        // Recommended croutons
+        const recs = data.recommended_croutons || [];
+        const recsEl = document.getElementById('fanout-recommended-croutons');
+        recsEl.innerHTML = recs.length ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px">` +
+          recs.map(r => {
+            const pColor = r.priority === 'high' ? '#ef4444' : r.priority === 'medium' ? '#f59e0b' : '#10b981';
+            return `<div style="border:1px solid var(--color-border);border-radius:8px;padding:10px">
+              <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+                <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
+                <span style="font-size:12px;font-weight:600;color:var(--color-text)">${escapeHtml(r.topic || '')}</span>
+              </div>
+              <p style="font-size:11px;color:var(--color-text-muted);margin:0">${escapeHtml(r.fact_hint || '')}</p>
+            </div>`;
+          }).join('') + `</div>` : `<p class="text-sm text-muted">No recommended croutons generated.</p>`;
+
+        document.getElementById('fanout-results').style.display = 'block';
+        lucide.createIcons();
+        toast('Fan-out analysis complete', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="git-branch" style="width:14px;height:14px"></i> Run Fan-Out Analysis';
+        lucide.createIcons();
+      }
+    });
+  }
+
+  // ── CC: LLM CONVERSIONS ──
+  function renderCCLLMConversions(el) {
+    el.innerHTML = `
+      <div class="cc-section-header">
+        <span class="cc-section-badge cc-badge-green">LLM Traffic</span>
+        <span class="text-sm text-muted">Track conversions from AI chatbots &amp; run Croutonization on your content</span>
+      </div>
+
+      <div class="cc-kpi-grid cc-kpi-grid-3">
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="trending-up" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">16%</div>
+            <div class="cc-kpi-label">Avg LLM Conversion Rate</div>
+            <div class="cc-kpi-delta cc-delta-up">+14.2% vs organic</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="globe" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">1.8%</div>
+            <div class="cc-kpi-label">Avg Organic Conversion Rate</div>
+            <div class="cc-kpi-delta cc-delta-neutral">Google baseline</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="bar-chart-3" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">~8.9x</div>
+            <div class="cc-kpi-label">LLM vs Organic Multiplier</div>
+            <div class="cc-kpi-delta cc-delta-up">Higher intent traffic</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px;margin-bottom:16px">
+        <div class="card-header"><h3 class="card-title">Croutonize Content</h3></div>
+        <div style="padding:4px 0">
+          <p class="text-sm text-muted" style="margin-bottom:12px">Convert raw content into atomic, machine-parseable croutons for AI retrieval. Produces NDJSON output, inference cost score, and retrieval advantage metric.</p>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Brand / Entity Name</label>
+              <input type="text" class="form-input" id="crouton-entity" placeholder="e.g., NameSilo, Croutons Agents">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label class="form-label">Topic</label>
+              <input type="text" class="form-input" id="crouton-topic" placeholder="e.g., domain registration pricing">
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:12px">
+            <label class="form-label">Content to Croutonize</label>
+            <textarea class="form-textarea" id="crouton-content" rows="6" placeholder="Paste your blog post, product description, landing page copy, or any content you want to convert into atomic croutons..."></textarea>
+          </div>
+          <button class="btn btn-primary" id="run-croutonize-btn" style="min-width:160px">
+            <i data-lucide="layers" style="width:14px;height:14px"></i>
+            Croutonize
+          </button>
+        </div>
+      </div>
+
+      <div id="croutonize-results" style="display:none">
+        <div class="cc-kpi-grid cc-kpi-grid-3" style="margin-bottom:16px">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="layers" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="crouton-count-val">0</div>
+              <div class="cc-kpi-label">Croutons Generated</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="gauge" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="crouton-ics-val">&mdash;</div>
+              <div class="cc-kpi-label">Inference Cost Score</div>
+              <div class="cc-kpi-delta cc-delta-neutral">lower is better</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="crouton-ra-val">&mdash;</div>
+              <div class="cc-kpi-label">Retrieval Advantage</div>
+              <div class="cc-kpi-delta cc-delta-neutral">1 / (1 + ICS)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Generated Croutons</h3></div>
+            <div id="crouton-cards-list" style="max-height:400px;overflow-y:auto;padding:4px 0"></div>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">NDJSON Output</h3>
+              <button class="btn btn-secondary btn-sm" id="copy-ndjson-btn">Copy</button>
+            </div>
+            <pre id="crouton-ndjson-output" style="font-size:11px;overflow:auto;max-height:400px;white-space:pre-wrap;word-break:break-all;background:var(--color-surface);border:1px solid var(--color-border);border-radius:8px;padding:10px;margin:4px 0"></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">On-Demand Bots (Real Referral Traffic)</h3></div>
+          <table class="cc-table">
+            <thead><tr><th>Source</th><th>User-Agent</th><th>Domain Pattern</th></tr></thead>
+            <tbody>
+              <tr><td>ChatGPT</td><td><code style="font-size:11px">ChatGPT-User</code></td><td>chatgpt.com, chat.openai.com</td></tr>
+              <tr><td>Claude</td><td><code style="font-size:11px">Claude-User</code></td><td>claude.ai</td></tr>
+              <tr><td>Perplexity</td>
