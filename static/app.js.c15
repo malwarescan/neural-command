@@ -1,0 +1,225 @@
+ ${isConnected ? `
+                      <button class="btn btn-ghost btn-sm test-conn-btn" data-service="${s.id}" data-name="${s.name}" title="Test connection">
+                        <i data-lucide="activity" style="width:14px;height:14px"></i>
+                      </button>
+                      <button class="btn btn-secondary btn-sm disconnect-btn" data-service="${s.id}">Disconnect</button>
+                    ` : `
+                      <button class="btn btn-primary btn-sm connect-btn" data-service="${s.id}" data-name="${s.name}" data-auth="${s.auth}" data-fields='${s.fields ? JSON.stringify(s.fields) : ""}'>Connect</button>
+                    `}
+                  </div>
+                </div>`;
+              }).join('')}
+            </div>
+          </div>`;
+      });
+
+      container.innerHTML = html;
+      lucide.createIcons();
+
+      // Bind connect buttons
+      document.querySelectorAll('.connect-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const auth = btn.dataset.auth;
+          const service = btn.dataset.service;
+          const name = btn.dataset.name;
+          if (auth === 'oauth') {
+            startOAuthFlow(service, name);
+          } else {
+            const fields = btn.dataset.fields ? JSON.parse(btn.dataset.fields) : [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}];
+            showApiKeyModal(service, name, fields);
+          }
+        });
+      });
+
+      // Bind disconnect buttons
+      document.querySelectorAll('.disconnect-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiFetch(`/api/connections/${btn.dataset.service}`, { method: 'DELETE' });
+            toast('Disconnected', 'success');
+            renderConnections(container);
+          } catch (err) {
+            toast(err.message, 'error');
+          }
+        });
+      });
+
+      // Bind test buttons
+      document.querySelectorAll('.test-conn-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const origHtml = btn.innerHTML;
+          btn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div>';
+          btn.disabled = true;
+          try {
+            const result = await apiFetch(`/api/connections/${btn.dataset.service}/test`);
+            toast(`${btn.dataset.name} connection verified`, 'success');
+            renderConnections(container);
+          } catch (err) {
+            toast(`${btn.dataset.name}: ${err.message}`, 'error');
+            btn.innerHTML = origHtml;
+            btn.disabled = false;
+          }
+        });
+      });
+
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load connections</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  async function startOAuthFlow(service, serviceName) {
+    try {
+      const data = await apiFetch(`/api/oauth/start/${service}`);
+      if (data.auth_url) {
+        // Open OAuth popup
+        const w = 600, h = 700;
+        const left = (screen.width - w) / 2;
+        const top = (screen.height - h) / 2;
+        const popup = window.open(data.auth_url, `oauth_${service}`, `width=${w},height=${h},left=${left},top=${top},toolbar=no,menubar=no`);
+        
+        // Listen for completion message from popup
+        const handler = (event) => {
+          if (event.data?.type === 'oauth_complete' && event.data?.service === service) {
+            window.removeEventListener('message', handler);
+            window.removeEventListener('storage', storageHandler);
+            toast(`${serviceName} connected successfully`, 'success');
+            const main = document.getElementById('main-content');
+            if (main) renderConnections(main);
+          }
+        };
+        window.addEventListener('message', handler);
+
+        // Also listen for localStorage signal (fallback when postMessage fails)
+        const storageHandler = (event) => {
+          if (event.key === 'oauth_complete') {
+            try {
+              const data = JSON.parse(event.newValue);
+              if (data.service === service) {
+                window.removeEventListener('storage', storageHandler);
+                window.removeEventListener('message', handler);
+                localStorage.removeItem('oauth_complete');
+                toast(`${serviceName} connected successfully`, 'success');
+                const main = document.getElementById('main-content');
+                if (main) renderConnections(main);
+              }
+            } catch(e) {}
+          }
+        };
+        window.addEventListener('storage', storageHandler);
+
+        // Fallback: poll for popup close
+        const pollTimer = setInterval(() => {
+          if (popup && popup.closed) {
+            clearInterval(pollTimer);
+            window.removeEventListener('message', handler);
+            window.removeEventListener('storage', storageHandler);
+            setTimeout(() => {
+              const main = document.getElementById('main-content');
+              if (main) renderConnections(main);
+            }, 1000);
+          }
+        }, 500);
+      }
+    } catch (err) {
+      if (err.message.includes('not configured')) {
+        toast(`${serviceName} OAuth is not configured yet. Contact admin.`, 'error');
+      } else {
+        toast(err.message, 'error');
+      }
+    }
+  }
+
+  // ── BILLING VIEW ─────────────────────────
+  async function renderBilling(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const profile = await apiFetch('/api/profile');
+      cachedProfile = profile;
+      let usage;
+      try {
+        usage = await apiFetch('/api/usage');
+      } catch { usage = { summary: { total_calls: 0, total_tokens: 0, total_cost_usd: 0 } }; }
+
+      const currentPlan = profile.plan || 'free';
+      const callsUsed = profile.api_calls_this_month || 0;
+      const callsLimit = profile.api_calls_limit || 100;
+      const callsPct = callsLimit > 0 ? Math.min((callsUsed / callsLimit) * 100, 100) : 0;
+      const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
+
+      const plans = [
+        {
+          id: 'free', name: 'Free', price: '$0', period: '/forever',
+          features: ['3 agents', '100 API calls/month', 'GPT-3.5 & GPT-4o Mini', 'Community support'],
+        },
+        {
+          id: 'pro', name: 'Pro', price: '$29', period: '/month',
+          features: ['10 agents', '500 API calls/month', 'All models including GPT-4o', 'Priority support', 'Advanced scheduling'],
+          featured: true,
+        },
+        {
+          id: 'enterprise', name: 'Enterprise', price: '$99', period: '/month',
+          features: ['Unlimited agents', 'Unlimited API calls', 'All models', 'Dedicated support', 'Custom integrations', 'SSO & SAML'],
+        },
+      ];
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Billing</h1>
+          <p class="page-subtitle">Manage your subscription and monitor usage</p>
+        </div>
+
+        <!-- Usage -->
+        <div class="card mb-6">
+          <div class="card-header">
+            <h3 class="card-title">This Month's Usage</h3>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:24px">
+            <div>
+              <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">API Calls</div>
+              <div style="font-size:24px;font-weight:700">${callsUsed} <span class="text-sm text-muted">/ ${callsLimit}</span></div>
+              <div style="margin-top:8px">
+                <div class="progress-bar"><div class="progress-bar-fill ${pctClass}" style="width:${callsPct}%"></div></div>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Total Tokens</div>
+              <div style="font-size:24px;font-weight:700">${(usage.summary?.total_tokens || 0).toLocaleString()}</div>
+            </div>
+            <div>
+              <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Cost</div>
+              <div style="font-size:24px;font-weight:700">$${(usage.summary?.total_cost_usd || 0).toFixed(4)}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Plans -->
+        <div class="pricing-grid mb-6">
+          ${plans.map(plan => `
+            <div class="pricing-card ${plan.featured ? 'featured' : ''} ${currentPlan === plan.id ? 'current' : ''}">
+              <div class="pricing-name">${plan.name}</div>
+              <div class="pricing-price">${plan.price}<span>${plan.period}</span></div>
+              <div class="pricing-features">
+                ${plan.features.map(f => `
+                  <div class="pricing-feature">
+                    <i data-lucide="check" style="width:14px;height:14px;color:var(--color-success)"></i>
+                    <span>${f}</span>
+                  </div>
+                `).join('')}
+              </div>
+              ${currentPlan === plan.id
+                ? `<button class="btn btn-secondary w-full" disabled>Current Plan</button>`
+                : plan.id === 'free'
+                  ? `<button class="btn btn-secondary w-full" disabled>Free Tier</button>`
+                  : `<button class="btn btn-primary w-full upgrade-btn" data-plan="${plan.id}">Upgrade to ${plan.name}</button>`
+              }
+            </div>
+          `).join('')}
+        </div>
+
+        ${currentPlan !== 'free' ? `
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Subscription Management</h3>
+            </div>
+            <p class="text-sm text-muted mb-4">Manage your subscription, update payment method
