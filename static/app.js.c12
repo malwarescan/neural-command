@@ -1,0 +1,230 @@
+ef="#/agents" class="btn btn-primary">Back to Agents</a></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── WIZARD VIEW ────────────────────────
+  let wizardTemplates = [];
+
+  async function renderWizard(container) {
+    // Fetch templates if not cached
+    if (wizardTemplates.length === 0) {
+      try {
+        wizardTemplates = await apiFetch('/api/templates');
+      } catch (err) {
+        toast('Failed to load templates', 'error');
+        wizardTemplates = [];
+      }
+    }
+
+    const steps = ['Template', 'Name', 'Goals', 'Connect', 'AI Config', 'Schedule', 'Rules', 'Review'];
+
+    container.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title">Create Agent</h1>
+      </div>
+      <div class="wizard-progress">
+        ${steps.map((s, i) => `
+          <div class="wizard-step-indicator ${i < wizardStep ? 'completed' : i === wizardStep ? 'current' : ''}"></div>
+        `).join('')}
+      </div>
+      <div class="wizard-step-label">Step ${wizardStep + 1} of ${steps.length}</div>
+      <div id="wizard-content"></div>
+      <div class="wizard-footer">
+        <button class="btn btn-secondary" id="wizard-back" ${wizardStep === 0 ? 'style="visibility:hidden"' : ''}>
+          <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Back
+        </button>
+        <button class="btn btn-primary" id="wizard-next">
+          ${wizardStep === steps.length - 1 ? 'Deploy Agent' : 'Continue'} <i data-lucide="arrow-right" style="width:14px;height:14px"></i>
+        </button>
+      </div>
+    `;
+
+    renderWizardStep(document.getElementById('wizard-content'));
+    lucide.createIcons();
+
+    document.getElementById('wizard-back')?.addEventListener('click', () => {
+      if (wizardStep > 0) { wizardStep--; renderWizard(container); }
+    });
+    document.getElementById('wizard-next')?.addEventListener('click', () => handleWizardNext(container));
+  }
+
+  function renderWizardStep(el) {
+    switch (wizardStep) {
+      case 0: renderWizardTemplate(el); break;
+      case 1: renderWizardName(el); break;
+      case 2: renderWizardGoals(el); break;
+      case 3: renderWizardConnect(el); break;
+      case 4: renderWizardAI(el); break;
+      case 5: renderWizardSchedule(el); break;
+      case 6: renderWizardRules(el); break;
+      case 7: renderWizardReview(el); break;
+    }
+    lucide.createIcons();
+  }
+
+  function renderWizardTemplate(el) {
+    el.innerHTML = `
+      <h2 class="wizard-step-title">Choose a Template</h2>
+      <div class="grid-3">
+        ${wizardTemplates.map(t => `
+          <div class="template-card ${wizardData.template_id === t.id ? 'selected' : ''}" data-id="${t.id}">
+            <div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>
+            <div class="template-card-name">${escapeHtml(t.name)}</div>
+            <div class="template-card-desc">${escapeHtml(t.description)}</div>
+            <div class="template-card-tags">
+              ${t.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+
+    lucide.createIcons();
+
+    el.querySelectorAll('.template-card').forEach(card => {
+      card.addEventListener('click', () => {
+        el.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        wizardData.template_id = card.dataset.id;
+        wizardData.templateObj = wizardTemplates.find(t => t.id === card.dataset.id);
+        // Pre-fill goals from template
+        if (wizardData.templateObj) {
+          wizardData.goals = [...wizardData.templateObj.default_goals];
+        }
+      });
+    });
+  }
+
+  function renderWizardName(el) {
+    el.innerHTML = `
+      <h2 class="wizard-step-title">Name & Describe Your Agent</h2>
+      <div class="card" style="max-width:600px">
+        <div class="form-group">
+          <label class="form-label">Agent Name</label>
+          <input type="text" class="form-input" id="wizard-name" placeholder="e.g., SEO Optimizer, Lead Qualifier" value="${escapeHtml(wizardData.name)}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Description</label>
+          <textarea class="form-textarea" id="wizard-desc" placeholder="Describe what this agent should do...">${escapeHtml(wizardData.description)}</textarea>
+        </div>
+      </div>`;
+  }
+
+  function renderWizardGoals(el) {
+    const defaultGoals = wizardData.templateObj?.default_goals || [];
+    el.innerHTML = `
+      <h2 class="wizard-step-title">Set Goals</h2>
+      <div class="card" style="max-width:600px">
+        <p class="text-sm text-muted mb-4">Select the goals for your agent:</p>
+        <div class="checkbox-group" id="goals-checkboxes">
+          ${defaultGoals.map((g, i) => `
+            <label class="checkbox-item">
+              <input type="checkbox" value="${escapeHtml(g)}" ${wizardData.goals.includes(g) ? 'checked' : ''}>
+              ${escapeHtml(g)}
+            </label>
+          `).join('')}
+        </div>
+        <div style="margin-top:16px">
+          <div class="form-group">
+            <label class="form-label">Add Custom Goal</label>
+            <div style="display:flex;gap:8px">
+              <input type="text" class="form-input" id="custom-goal-input" placeholder="Enter a custom goal">
+              <button class="btn btn-secondary btn-sm" id="add-custom-goal">Add</button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+
+    document.getElementById('add-custom-goal')?.addEventListener('click', () => {
+      const input = document.getElementById('custom-goal-input');
+      const val = input.value.trim();
+      if (val) {
+        wizardData.goals.push(val);
+        input.value = '';
+        renderWizardGoals(el);
+      }
+    });
+  }
+
+  function renderWizardConnect(el) {
+    const services = [
+      { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>' },
+      { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>' },
+      { id: 'social_media', name: 'Social Media', icon: '<i data-lucide="share-2" style="width:20px;height:20px;color:#1d9bf0"></i>' },
+      { id: 'crm', name: 'CRM', icon: '<i data-lucide="briefcase" style="width:20px;height:20px;color:#7c3aed"></i>' },
+      { id: 'email', name: 'Email', icon: '<i data-lucide="mail" style="width:20px;height:20px;color:#10b981"></i>' },
+      { id: 'custom_api', name: 'Custom API', icon: '<i data-lucide="plug" style="width:20px;height:20px;color:#94a3b8"></i>' },
+    ];
+
+    el.innerHTML = `
+      <h2 class="wizard-step-title">Connect Services</h2>
+      <p class="text-sm text-muted mb-4">Optional: connect external services your agent can use.</p>
+      <div class="grid-3">
+        ${services.map(s => `
+          <div class="connection-card">
+            <div class="connection-icon">${s.icon}</div>
+            <div class="connection-info">
+              <div class="connection-name">${s.name}</div>
+              <div class="connection-status">
+                <span class="connection-status-dot"></span>
+                <span>Not connected</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm connect-service-btn" data-service="${s.id}" data-name="${s.name}">Connect</button>
+          </div>
+        `).join('')}
+      </div>`;
+
+    el.querySelectorAll('.connect-service-btn').forEach(btn => {
+      btn.addEventListener('click', () => showApiKeyModal(btn.dataset.service, btn.dataset.name, [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}]));
+    });
+  }
+
+  function showApiKeyModal(serviceId, serviceName, fields) {
+    const overlay = el('div', { className: 'modal-overlay', id: 'apikey-modal' });
+    const fieldInputs = fields.map((f, i) => `
+      <div class="form-group">
+        <label class="form-label">${f.label}</label>
+        <input type="password" class="form-input" id="apikey-field-${i}" placeholder="${f.placeholder || ''}" required>
+      </div>
+    `).join('');
+
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Connect ${escapeHtml(serviceName)}</h3>
+          <button class="btn btn-ghost btn-icon" id="close-apikey-modal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-sm text-muted" style="margin-bottom:16px">Enter your credentials to connect ${escapeHtml(serviceName)} to your agents.</p>
+          ${fieldInputs}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary" id="cancel-apikey">Cancel</button>
+          <button class="btn btn-primary" id="save-apikey"><i data-lucide="check" style="width:14px;height:14px"></i> Connect</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    lucide.createIcons({ nodes: [overlay] });
+
+    overlay.querySelector('#close-apikey-modal').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#cancel-apikey').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('#save-apikey').addEventListener('click', async () => {
+      const btn = overlay.querySelector('#save-apikey');
+      const credentials = {};
+      let allFilled = true;
+      fields.forEach((f, i) => {
+        const val = document.getElementById(`apikey-field-${i}`).value.trim();
+        if (!val) allFilled = false;
+        credentials[f.key] = val;
+      });
+      if (!allFilled) { toast('Please fill in all fields', 'error'); return; }
+      
+      btn.disabled = true;
+      btn.textContent = 'Connecting...';
+      try {
+        await apiFetch('/api/connections/apikey', {
+          method: 'POST',
+          bod
