@@ -1,10 +1,10 @@
-name: Merge app.js 3 parts
+name: Merge app.js 5 parts
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'static/app.js.p3'
+      - 'static/app.js.p5'
 
 jobs:
   merge:
@@ -12,29 +12,26 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
         
-      - name: Merge app.js parts
+      - name: Merge parts
         run: |
-          if [ ! -f "static/app.js.p1" ] || [ ! -f "static/app.js.p2" ] || [ ! -f "static/app.js.p3" ]; then
-            echo "Parts not found"
-            ls static/app.js.p* 2>/dev/null || echo "No parts found"
-            exit 1
-          fi
+          for p in p1 p2 p3 p4 p5; do
+            if [ ! -f "static/app.js.$p" ]; then
+              echo "Missing: static/app.js.$p"
+              exit 1
+            fi
+          done
+          cat static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5 > static/app.js
+          echo "Merged size: $(wc -c < static/app.js) bytes"
+          rm static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5
           
-          cat static/app.js.p1 static/app.js.p2 static/app.js.p3 > static/app.js
-          
-          SIZE=$(wc -c < static/app.js)
-          echo "Merged app.js size: $SIZE bytes"
-          
-          rm static/app.js.p1 static/app.js.p2 static/app.js.p3
-          
-      - name: Commit merged file
+      - name: Commit
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add static/app.js
-          git rm --cached static/app.js.p1 static/app.js.p2 static/app.js.p3 2>/dev/null || true
-          git commit -m "fix: merge full app.js (160KB) from 3 parts" || echo "Nothing to commit"
+          git rm --cached static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5 2>/dev/null || true
+          git commit -m "fix: restore full app.js 160KB from 5 parts" || echo "Nothing to commit"
           git push
