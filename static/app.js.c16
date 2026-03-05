@@ -1,0 +1,236 @@
+s, or cancel.</p>
+            <button class="btn btn-secondary" id="manage-subscription-btn"><i data-lucide="external-link" style="width:14px;height:14px"></i> Manage Subscription</button>
+          </div>
+        ` : ''}
+      `;
+
+      lucide.createIcons();
+
+      // Bind upgrade buttons
+      document.querySelectorAll('.upgrade-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          btn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div> Redirecting...';
+          try {
+            const result = await apiFetch('/api/billing/create-checkout', {
+              method: 'POST',
+              body: JSON.stringify({
+                plan: btn.dataset.plan,
+                success_url: window.location.href.split('#')[0] + '#/dashboard',
+                cancel_url: window.location.href.split('#')[0] + '#/billing',
+              }),
+            });
+            if (result.checkout_url) {
+              window.open(result.checkout_url, '_blank');
+              toast('Stripe checkout opened in new tab', 'info');
+              btn.disabled = false;
+              btn.textContent = `Upgrade to ${btn.dataset.plan === 'pro' ? 'Pro' : 'Enterprise'}`;
+            }
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = `Upgrade to ${btn.dataset.plan === 'pro' ? 'Pro' : 'Enterprise'}`;
+          }
+        });
+      });
+
+      // Manage subscription
+      document.getElementById('manage-subscription-btn')?.addEventListener('click', async () => {
+        try {
+          const result = await apiFetch('/api/billing/portal');
+          if (result.portal_url) {
+            window.open(result.portal_url, '_blank');
+          }
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load billing</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── SETTINGS VIEW ──────────────────────
+  async function renderSettings(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const profile = await apiFetch('/api/profile');
+      cachedProfile = profile;
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Settings</h1>
+          <p class="page-subtitle">Manage your account and preferences</p>
+        </div>
+
+        <div class="card mb-6">
+          <div class="settings-section">
+            <h3 class="settings-section-title">Profile</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;max-width:600px">
+              <div class="form-group">
+                <label class="form-label">Display Name</label>
+                <input type="text" class="form-input" id="settings-name" value="${escapeHtml(profile.display_name || '')}">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" value="${escapeHtml(profile.email || '')}" disabled style="opacity:0.6">
+                <div class="form-hint">Email cannot be changed</div>
+              </div>
+            </div>
+            <button class="btn btn-primary btn-sm" id="save-profile-btn" style="margin-top:8px">
+              <i data-lucide="save" style="width:14px;height:14px"></i> Save Changes
+            </button>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">Account</h3>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;max-width:600px">
+              <div>
+                <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Plan</div>
+                <div class="font-semibold" style="text-transform:capitalize">${profile.plan || 'free'}</div>
+              </div>
+              <div>
+                <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Agent Limit</div>
+                <div class="font-semibold">${profile.agents_limit || 3}</div>
+              </div>
+              <div>
+                <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">API Calls Limit</div>
+                <div class="font-semibold">${profile.api_calls_limit || 100}/month</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-section">
+            <h3 class="settings-section-title">Session</h3>
+            <p class="text-sm text-muted mb-4">Sign out of your account on this device.</p>
+            <button class="btn btn-secondary" id="settings-signout-btn">
+              <i data-lucide="log-out" style="width:14px;height:14px"></i> Sign Out
+            </button>
+          </div>
+        </div>
+      `;
+
+      lucide.createIcons();
+
+      document.getElementById('save-profile-btn')?.addEventListener('click', async () => {
+        const displayName = document.getElementById('settings-name').value.trim();
+        const btn = document.getElementById('save-profile-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div> Saving...';
+        try {
+          const updated = await apiFetch('/api/profile', {
+            method: 'PATCH',
+            body: JSON.stringify({ display_name: displayName }),
+          });
+          cachedProfile = updated;
+          toast('Profile updated', 'success');
+          btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px"></i> Save Changes';
+          btn.disabled = false;
+          lucide.createIcons({ nodes: [btn] });
+          // Update sidebar name
+          const nameEl = document.querySelector('.sidebar-user-name');
+          if (nameEl) nameEl.textContent = displayName || cachedProfile.email;
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.innerHTML = '<i data-lucide="save" style="width:14px;height:14px"></i> Save Changes';
+          btn.disabled = false;
+          lucide.createIcons({ nodes: [btn] });
+        }
+      });
+
+      document.getElementById('settings-signout-btn')?.addEventListener('click', async () => {
+        await supabase.auth.signOut();
+        currentSession = null;
+        cachedProfile = null;
+        navigate('#/login');
+      });
+
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load settings</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── SIDEBAR TOGGLE ─────────────────────────
+  function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    sidebarOpen = !sidebarOpen;
+    sidebar?.classList.toggle('open', sidebarOpen);
+    backdrop?.classList.toggle('open', sidebarOpen);
+  }
+
+  // ── INIT ─────────────────────────────────────
+  async function init() {
+    // 1. Load config from backend
+    try {
+      const cfgRes = await fetch(`${API}/api/config`);
+      if (!cfgRes.ok) throw new Error('Failed to load config');
+      const cfg = await cfgRes.json();
+      SUPABASE_URL = cfg.supabase_url;
+      SUPABASE_ANON_KEY = cfg.supabase_anon_key;
+      STRIPE_PK = cfg.stripe_publishable_key || '';
+    } catch (err) {
+      console.error('Config load failed:', err);
+      document.getElementById('app').innerHTML = '<div style="padding:2rem;text-align:center;"><h2>Unable to connect to server</h2><p>Please try again in a moment.</p></div>';
+      return;
+    }
+
+    // 2. Initialize Supabase client
+    supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+    // 3. Get initial session FIRST (before registering auth listener)
+    const { data: { session } } = await supabase.auth.getSession();
+    currentSession = session;
+
+    // 4. Listen for auth state changes (after initial session is set)
+    supabase.auth.onAuthStateChange((event, session) => {
+      const hadSession = !!currentSession;
+      currentSession = session;
+
+      if (event === 'SIGNED_IN' && !hadSession) {
+        cachedProfile = null;
+        // Only redirect to dashboard if on an auth route
+        const currentRoute = getRoute();
+        const authRoutes = ['#/login', '#/signup', '#/forgot'];
+        if (authRoutes.includes(currentRoute) || !currentRoute || currentRoute === '') {
+          navigate('#/dashboard');
+        } else {
+          render();
+        }
+      } else if (event === 'SIGNED_OUT') {
+        currentSession = null;
+        cachedProfile = null;
+        navigate('#/login');
+      } else if (event === 'TOKEN_REFRESHED') {
+        // Just update session, no navigation needed
+      }
+    });
+
+    // Listen for hash changes
+    window.addEventListener('hashchange', render);
+
+    // Initial render
+    if (!window.location.hash) {
+      window.location.hash = currentSession ? '#/dashboard' : '#/login';
+    }
+    render();
+  }
+
+  // ── PUBLIC API (for onclick handlers) ──────
+  window.NC = {
+    toggleSidebar,
+    render,
+    resetWizard: () => {
+      wizardStep = 0;
+      wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+      navigate('#/wizard');
+    },
+  };
+
+  // ── BOOT ─────────────────────────────────────
+  init();
+
+})();
