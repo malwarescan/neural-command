@@ -1,0 +1,202 @@
+
+            <div class="kpi-meta">${data.active_agents} active</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Active Runs</div>
+            <div class="kpi-value">${data.active_runs}</div>
+            <div class="kpi-meta">Currently running</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">API Calls</div>
+            <div class="kpi-value">${data.api_calls_this_month}<span style="font-size:14px;color:var(--color-text-muted)">/${data.api_calls_limit}</span></div>
+            <div style="margin-top:8px">
+              <div class="progress-bar"><div class="progress-bar-fill ${pctClass}" style="width:${callsPct}%"></div></div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Current Plan</div>
+            <div class="kpi-value" style="font-size:22px;text-transform:capitalize">${plan}</div>
+            <div class="kpi-meta"><span class="badge badge-${plan}">${plan}</span></div>
+          </div>
+        </div>
+
+        ${data.total_agents === 0 ? `
+          <div class="card" style="text-align:center;padding:48px 24px;margin-bottom:24px">
+            <div class="empty-state-icon" style="margin:0 auto 16px"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
+            <h3 class="empty-state-title">Create Your First Agent</h3>
+            <p class="empty-state-desc">Deploy an AI agent to automate your workflow. Choose from templates or build from scratch.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Get Started</a>
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Recent Activity</h3>
+          </div>
+          ${data.recent_runs.length === 0
+            ? `<p class="text-sm text-muted" style="padding:16px 0">No recent activity yet. Run an agent to see results here.</p>`
+            : `<table class="runs-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.recent_runs.map(run => `
+                    <tr>
+                      <td><strong>${escapeHtml(run.agent_id?.substring(0, 8) || '—')}</strong></td>
+                      <td><span class="badge badge-${run.status}">${run.status}</span></td>
+                      <td>${run.total_tokens || '—'}</td>
+                      <td>${timeAgo(run.started_at)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+          }
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load dashboard</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="window.NC.render()">Retry</button></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── COMMAND CENTER ────────────────────────
+  let ccActiveTab = 'overview';
+  let ccCharts = {};
+
+  async function renderCommandCenter(container) {
+    const tabs = [
+      { id: 'overview', label: 'Overview', icon: 'gauge' },
+      { id: 'seo', label: 'SEO Metrics', icon: 'search' },
+      { id: 'ai-visibility', label: 'AI Visibility', icon: 'eye' },
+      { id: 'llm-conversions', label: 'LLM Conversions', icon: 'trending-up' },
+      { id: 'competitors', label: 'Competitors', icon: 'swords' },
+      { id: 'agent-ops', label: 'Agent Ops', icon: 'activity' },
+    ];
+
+    container.innerHTML = `
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#00c8ff 0%,#7c3aed 100%);display:flex;align-items:center;justify-content:center">
+            <i data-lucide="radar" style="width:20px;height:20px;color:#fff"></i>
+          </div>
+          <div>
+            <h1 class="page-title" style="margin:0">Command Center</h1>
+            <p class="page-subtitle" style="margin:0">SEO, AEO, GEO &amp; Agent Intelligence</p>
+          </div>
+        </div>
+      </div>
+      <div class="cc-tabs">
+        ${tabs.map(t => `
+          <button class="cc-tab ${ccActiveTab === t.id ? 'cc-tab-active' : ''}" data-tab="${t.id}">
+            <i data-lucide="${t.icon}" style="width:14px;height:14px"></i>
+            <span>${t.label}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div id="cc-content" class="cc-content"></div>
+    `;
+
+    // Bind tab clicks
+    container.querySelectorAll('.cc-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ccActiveTab = btn.dataset.tab;
+        // Destroy existing charts
+        Object.values(ccCharts).forEach(c => { try { c.destroy(); } catch(e){} });
+        ccCharts = {};
+        renderCommandCenter(container);
+      });
+    });
+
+    lucide.createIcons();
+    const ccEl = document.getElementById('cc-content');
+    if (!ccEl) return;
+
+    if (ccActiveTab === 'overview') await renderCCOverview(ccEl);
+    else if (ccActiveTab === 'seo') await renderCCSEO(ccEl);
+    else if (ccActiveTab === 'ai-visibility') renderCCAIVisibility(ccEl);
+    else if (ccActiveTab === 'llm-conversions') renderCCLLMConversions(ccEl);
+    else if (ccActiveTab === 'competitors') renderCCCompetitors(ccEl);
+    else if (ccActiveTab === 'agent-ops') await renderCCAgentOps(ccEl);
+  }
+
+  // ── CC: OVERVIEW TAB ──
+  async function renderCCOverview(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/overview');
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="plug" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.service_count}</div>
+              <div class="cc-kpi-label">Connected Services</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="bot" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.agents.total}</div>
+              <div class="cc-kpi-label">Agents <span class="badge badge-active">${data.agents.active} active</span></div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${(data.agents.total_tokens || 0).toLocaleString()}</div>
+              <div class="cc-kpi-label">Total Tokens</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">$${(data.cost_total_usd || 0).toFixed(4)}</div>
+              <div class="cc-kpi-label">Total Cost (recent)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Connected Services</h3></div>
+            <div class="cc-services-list">
+              ${data.connected_services.length === 0
+                ? '<p class="text-sm text-muted" style="padding:12px 0">No services connected. Go to <a href="#/connections">Connections</a> to set up.</p>'
+                : data.connected_services.map(s => `
+                    <div class="cc-service-item">
+                      <span class="cc-service-dot cc-service-dot-active"></span>
+                      <span>${escapeHtml(s.replace(/_/g, ' '))}</span>
+                    </div>
+                  `).join('')
+              }
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Recent Activity</h3></div>
+            ${data.recent_runs.length === 0
+              ? '<p class="text-sm text-muted" style="padding:12px 0">No recent runs yet.</p>'
+              : `<div class="cc-activity-list">
+                  ${data.recent_runs.slice(0, 8).map(r => `
+                    <div class="cc-activity-item">
+                      <span class="badge badge-${r.status}" style="font-size:10px">${r.status}</span>
+                      <span class="cc-activity-text">${escapeHtml(r.input_preview || '—')}</span>
+                      <span class="cc-activity-meta">${r.total_tokens || 0} tok · ${timeAgo(r.started_at)}</span>
+                    </div>
+                  `).join('')}
+                </div>`
+            }
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Quick Navigation</h3></div>
+          <div class="cc-quick-nav">
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=seo]').click()"><i data-lucide="search" style="width:16px;height:16px"></i>SEO Metrics</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=ai-visibility]').click()"><i data-lucide="eye" style="width:16px;height:16px"></i>AI Visibility</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=llm-conversions]').click()"><i data-lucide="trending-up" style="width:16px;height:16px"></i>LLM Conversions</button>
