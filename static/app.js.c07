@@ -1,0 +1,177 @@
+<td><code style="font-size:11px">Perplexity-User</code></td><td>perplexity.ai</td></tr>
+              <tr><td>Gemini</td><td>&mdash;</td><td>gemini.google.com</td></tr>
+              <tr><td>Copilot</td><td>&mdash;</td><td>copilot.microsoft.com</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Citation vs Influence</h3></div>
+          <div style="padding:4px 0">
+            <div class="cc-activity-list">
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#10b981;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Explicit Citations [1][2][3] &mdash; HIGH value</span>
+                  <span class="cc-activity-text">Inline citations in AI responses. Clickable links. Generate real referral traffic.</span>
+                </div>
+              </div>
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#f59e0b;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Sources Section &mdash; MEDIUM value</span>
+                  <span class="cc-activity-text">Appears in the Sources panel at bottom. Less prominent but drives referral traffic.</span>
+                </div>
+              </div>
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#ef4444;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Implicit Grounding (ref_type: academia) &mdash; ZERO traffic</span>
+                  <span class="cc-activity-text">Used for model grounding only. Never shown to users. Wikipedia, arXiv qualify here.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+
+    document.getElementById('run-croutonize-btn')?.addEventListener('click', async () => {
+      const entity = document.getElementById('crouton-entity')?.value?.trim();
+      const topic = document.getElementById('crouton-topic')?.value?.trim();
+      const content = document.getElementById('crouton-content')?.value?.trim();
+      if (!entity || !topic || !content) { toast('Entity, topic, and content are all required', 'error'); return; }
+
+      const btn = document.getElementById('run-croutonize-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<i data-lucide="loader-2" style="width:14px;height:14px"></i> Croutonizing...';
+      lucide.createIcons();
+
+      try {
+        const data = await apiFetch('/api/croutonize', {
+          method: 'POST',
+          body: JSON.stringify({ entity, topic, text: content }),
+        });
+
+        document.getElementById('crouton-count-val').textContent = data.crouton_count || (data.croutons?.length || 0);
+        document.getElementById('crouton-ics-val').textContent = (data.inference_cost_score || 0).toFixed(2);
+        document.getElementById('crouton-ra-val').textContent = (data.retrieval_advantage || 0).toFixed(4);
+
+        // Crouton cards
+        const cards = document.getElementById('crouton-cards-list');
+        cards.innerHTML = (data.croutons || []).map((c, i) => `
+          <div style="border:1px solid var(--color-border);border-radius:8px;padding:10px;margin-bottom:8px">
+            <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+              <span style="font-size:10px;color:var(--color-text-muted);font-family:monospace">${escapeHtml(c.crouton_id || 'c-' + String(i+1).padStart(3,'0'))}</span>
+              <span style="font-size:11px;font-weight:600;color:var(--color-text)">${escapeHtml(c.entity_primary || entity)}</span>
+            </div>
+            <p style="font-size:12px;color:var(--color-text);margin:0 0 4px 0;font-weight:500">${escapeHtml(c.fact || '')}</p>
+            <p style="font-size:11px;color:var(--color-text-muted);margin:0 0 4px 0">${escapeHtml(c.context || '')}</p>
+            <p style="font-size:11px;color:var(--color-text-secondary);margin:0">${escapeHtml(c.application || '')}</p>
+          </div>`).join('');
+
+        // NDJSON output
+        document.getElementById('crouton-ndjson-output').textContent = data.ndjson || '';
+
+        document.getElementById('croutonize-results').style.display = 'block';
+        toast('Content croutonized successfully', 'success');
+      } catch (err) {
+        toast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<i data-lucide="layers" style="width:14px;height:14px"></i> Croutonize';
+        lucide.createIcons();
+      }
+    });
+
+    document.getElementById('copy-ndjson-btn')?.addEventListener('click', () => {
+      const ndjson = document.getElementById('crouton-ndjson-output')?.textContent;
+      if (ndjson) {
+        navigator.clipboard.writeText(ndjson).then(() => toast('NDJSON copied to clipboard', 'success')).catch(() => toast('Copy failed', 'error'));
+      }
+    });
+  }
+
+  // ── CC: COMPETITORS & CITATION GAPS ──
+  function renderCCCompetitors(el) {
+    el.innerHTML = `
+      <div class="cc-section-header">
+        <span class="cc-section-badge cc-badge-orange">Competitive Intel</span>
+        <span class="text-sm text-muted">Track competitor citations, identify gaps, and score content inference cost</span>
+      </div>
+
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3 class="card-title">Inference Cost Scorer</h3></div>
+        <div style="padding:4px 0">
+          <p class="text-sm text-muted" style="margin-bottom:12px">Score any URL or content on the 6 inference cost dimensions (atomicity, context completeness, structure, ambiguity, entity clarity, freshness signaling). Lower scores mean higher AI retrieval probability.</p>
+          <div class="form-group" style="margin-bottom:8px">
+            <label class="form-label">URL to Score</label>
+            <input type="text" class="form-input" id="ics-url" placeholder="https://example.com/page-to-score">
+          </div>
+          <div style="text-align:center;font-size:12px;color:var(--color-text-muted);margin-bottom:8px">OR</div>
+          <div class="form-group" style="margin-bottom:12px">
+            <label class="form-label">Paste Content Directly</label>
+            <textarea class="form-textarea" id="ics-content" rows="5" placeholder="Paste content to score directly if you don't have a URL..."></textarea>
+          </div>
+          <button class="btn btn-primary" id="run-ics-btn" style="min-width:160px">
+            <i data-lucide="gauge" style="width:14px;height:14px"></i>
+            Score Content
+          </button>
+        </div>
+      </div>
+
+      <div id="ics-results" style="display:none">
+        <div class="cc-kpi-grid cc-kpi-grid-3" style="margin-bottom:16px">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="gauge" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="ics-total-val">&mdash;</div>
+              <div class="cc-kpi-label">Total Inference Cost Score</div>
+              <div class="cc-kpi-delta cc-delta-neutral">0=optimal, 30=worst</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="ics-ra-val">&mdash;</div>
+              <div class="cc-kpi-label">Retrieval Advantage</div>
+              <div class="cc-kpi-delta cc-delta-neutral">1 / (1 + ICS)</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="bar-chart-3" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value" id="ics-grade-val">&mdash;</div>
+              <div class="cc-kpi-label">Score Grade</div>
+              <div class="cc-kpi-delta cc-delta-neutral">A=0-5, B=6-10, C=11-18, D=19-25, F=26+</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2" style="margin-bottom:16px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Score Breakdown (Radar Chart)</h3></div>
+            <div style="height:280px;display:flex;align-items:center;justify-content:center;padding:8px">
+              <canvas id="ics-radar-chart"></canvas>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Dimension Scores</h3></div>
+            <div id="ics-dimension-bars" style="padding:4px 0"></div>
+          </div>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h3 class="card-title">Recommendations</h3></div>
+          <div id="ics-recommendations" style="padding:4px 0"></div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Citation Gap Analysis</h3></div>
+          <div style="padding:16px 0">
+            <p class="text-sm" style="margin-bottom:16px">Use your SEO agents to monitor which competitors appear in AI answers for your target queries.</p>
+            <div class="cc-gap-example">
+              <div class="cc-gap-row cc-gap-header"><span>Query</span><span>You</span><span>Competitor A</span><span>Competitor B</span></div>
+              <div class="cc-gap-row"><span class="cc-query-cell">best domain registrar</span><span class="cc-gap-check">&mdash;</sp
