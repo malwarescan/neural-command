@@ -1,0 +1,1680 @@
+/* ═══════════════════════════════════════════════
+   Croutons Agents — Production Frontend SPA
+   ═══════════════════════════════════════════════ */
+
+(function () {
+  'use strict';
+
+  // ── CONFIG (loaded from /api/config) ──────
+  const API = '';
+  let SUPABASE_URL = '';
+  let SUPABASE_ANON_KEY = '';
+  let STRIPE_PK = '';
+
+  // ── SUPABASE CLIENT (initialized after config loads) ──
+  let supabase = null;
+
+  // ── IN-MEMORY STATE ────────────────────────
+  let currentSession = null;
+  let cachedProfile = null;
+  let sidebarOpen = false;
+
+  // Wizard state
+  let wizardStep = 0;
+  let wizardData = {
+    template_id: null,
+    templateObj: null,
+    name: '',
+    description: '',
+    goals: [],
+    connections: [],
+    model: 'gpt-4o-mini',
+    temperature: 0.7,
+    max_tokens: 1024,
+    schedule: 'daily',
+    rules: [],
+  };
+
+  // ── LOGO SVG ───────────────────────────────
+  const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NBq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
+
+  // ── HELPERS ────────────────────────────────
+  function $(sel) { return document.querySelector(sel); }
+  function $$(sel) { return document.querySelectorAll(sel); }
+  function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    if (attrs) Object.entries(attrs).forEach(([k, v]) => {
+      if (k === 'className') e.className = v;
+      else if (k === 'innerHTML') e.innerHTML = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
+      else e.setAttribute(k, v);
+    });
+    children.forEach(c => {
+      if (typeof c === 'string') e.appendChild(document.createTextNode(c));
+      else if (c) e.appendChild(c);
+    });
+    return e;
+  }
+
+  function timeAgo(dateStr) {
+    if (!dateStr) return 'Never';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    return new Date(dateStr).toLocaleString();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ── TOAST ──────────────────────────────────
+  function toast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const t = el('div', { className: `toast toast-${type}` });
+    const iconMap = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+    t.innerHTML = `<i data-lucide="${iconMap[type] || 'info'}"></i><span>${escapeHtml(message)}</span>`;
+    container.appendChild(t);
+    lucide.createIcons({ nodes: [t] });
+    setTimeout(() => {
+      t.classList.add('toast-exit');
+      setTimeout(() => t.remove(), 200);
+    }, 4000);
+  }
+
+  // ── API FETCH HELPER ───────────────────────
+  async function apiFetch(path, options = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentSession?.access_token) {
+      headers['Authorization'] = `Bearer ${currentSession.access_token}`;
+    }
+    const resp = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...options.headers } });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const msg = data?.detail || `Request failed (${resp.status})`;
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // ── ROUTER ─────────────────────────────────
+  function navigate(hash) {
+    window.location.hash = hash;
+  }
+
+  function getRoute() {
+    const hash = window.location.hash || '#/login';
+    return hash;
+  }
+
+  function getRouteParams(pattern, hash) {
+    // e.g., pattern = '#/agent/:id'
+    const patParts = pattern.split('/');
+    const hashParts = hash.split('/');
+    if (patParts.length !== hashParts.length) return null;
+    const params = {};
+    for (let i = 0; i < patParts.length; i++) {
+      if (patParts[i].startsWith(':')) {
+        params[patParts[i].slice(1)] = hashParts[i];
+      } else if (patParts[i] !== hashParts[i]) {
+        return null;
+      }
+    }
+    return params;
+  }
+
+  // ── RENDER ENGINE ──────────────────────────
+  function render() {
+    const route = getRoute();
+    const app = document.getElementById('app');
+
+    // Auth routes (no session needed)
+    const authRoutes = ['#/login', '#/signup', '#/forgot'];
+    const isAuthRoute = authRoutes.includes(route);
+
+    if (!currentSession && !isAuthRoute) {
+      navigate('#/login');
+      return;
+    }
+
+    if (currentSession && isAuthRoute) {
+      navigate('#/dashboard');
+      return;
+    }
+
+    if (isAuthRoute) {
+      renderAuthView(route, app);
+    } else {
+      renderAppShell(route, app);
+    }
+
+    // Initialize Lucide icons after render
+    requestAnimationFrame(() => lucide.createIcons());
+  }
+
+  // ── AUTH VIEWS ─────────────────────────────
+  function renderAuthView(route, container) {
+    let html = '';
+    if (route === '#/login') html = loginView();
+    else if (route === '#/signup') html = signupView();
+    else if (route === '#/forgot') html = forgotView();
+    container.innerHTML = `<div class="auth-layout">${html}</div>`;
+    bindAuthEvents(route);
+  }
+
+  function loginView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-subtitle">Sign in to manage your AI agents</p>
+        <div id="auth-error"></div>
+        <form class="auth-form" id="login-form">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="login-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-input" id="login-password" placeholder="Enter your password" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="login-btn">Sign In</button>
+        </form>
+        <div class="auth-links">
+          <a href="#/forgot">Forgot password?</a><br>
+          Don't have an account? <a href="#/signup">Sign up</a>
+        </div>
+      </div>`;
+  }
+
+  function signupView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Create your account</h1>
+        <p class="auth-subtitle">Start deploying AI agents in minutes</p>
+        <div id="auth-error"></div>
+        <div id="auth-success"></div>
+        <form class="auth-form" id="signup-form">
+          <div class="form-group">
+            <label class="form-label">Display Name</label>
+            <input type="text" class="form-input" id="signup-name" placeholder="Your name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="signup-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-input" id="signup-password" placeholder="Min. 6 characters" required minlength="6">
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="signup-btn">Create Account</button>
+        </form>
+        <div class="auth-links">
+          Already have an account? <a href="#/login">Sign in</a>
+        </div>
+      </div>`;
+  }
+
+  function forgotView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Reset your password</h1>
+        <p class="auth-subtitle">Enter your email and we'll send a reset link</p>
+        <div id="auth-error"></div>
+        <div id="auth-success"></div>
+        <form class="auth-form" id="forgot-form">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="forgot-email" placeholder="you@example.com" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="forgot-btn">Send Reset Link</button>
+        </form>
+        <div class="auth-links">
+          <a href="#/login">Back to sign in</a>
+        </div>
+      </div>`;
+  }
+
+  function bindAuthEvents(route) {
+    if (route === '#/login') {
+      const form = document.getElementById('login-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('login-btn');
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Signing in...';
+        document.getElementById('auth-error').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          // Session is set via onAuthStateChange
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Sign In';
+        }
+      });
+    } else if (route === '#/signup') {
+      const form = document.getElementById('signup-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('signup-btn');
+        const name = document.getElementById('signup-name').value.trim();
+        const email = document.getElementById('signup-email').value.trim();
+        const password = document.getElementById('signup-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Creating account...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { display_name: name || email.split('@')[0] } }
+          });
+          if (error) throw error;
+          // Check if auto-confirm is off (no session returned)
+          if (!data.session) {
+            document.getElementById('auth-success').innerHTML = `<div class="auth-success">Check your email to confirm your account before signing in.</div>`;
+            btn.textContent = 'Account Created';
+          }
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Create Account';
+        }
+      });
+    } else if (route === '#/forgot') {
+      const form = document.getElementById('forgot-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('forgot-btn');
+        const email = document.getElementById('forgot-email').value.trim();
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+          document.getElementById('auth-success').innerHTML = `<div class="auth-success">If that email exists, we've sent a reset link.</div>`;
+          btn.textContent = 'Sent';
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send Reset Link';
+        }
+      });
+    }
+  }
+
+  // ── APP SHELL ──────────────────────────────
+  function renderAppShell(route, container) {
+    const navItems = [
+      { icon: 'layout-dashboard', label: 'Dashboard', hash: '#/dashboard' },
+      { icon: 'radar', label: 'Command Center', hash: '#/command-center' },
+      { icon: 'bot', label: 'My Agents', hash: '#/agents' },
+      { icon: 'plus-circle', label: 'Create Agent', hash: '#/wizard' },
+      { icon: 'layers', label: 'Templates', hash: '#/templates' },
+      { icon: 'plug', label: 'Connections', hash: '#/connections' },
+      { icon: 'credit-card', label: 'Billing', hash: '#/billing' },
+      { icon: 'settings', label: 'Settings', hash: '#/settings' },
+    ];
+
+    const activeHash = route.startsWith('#/agent/') ? '#/agents' : route.split('?')[0];
+    const userName = cachedProfile?.display_name || currentSession?.user?.user_metadata?.display_name || 'User';
+    const userEmail = cachedProfile?.email || currentSession?.user?.email || '';
+    const userInitial = (userName[0] || 'U').toUpperCase();
+
+    // Determine page title
+    let pageTitle = 'Dashboard';
+    if (route === '#/command-center') pageTitle = 'Command Center';
+    else if (route === '#/agents') pageTitle = 'My Agents';
+    else if (route === '#/wizard') pageTitle = 'Create Agent';
+    else if (route === '#/templates') pageTitle = 'Templates';
+    else if (route === '#/connections') pageTitle = 'Connections';
+    else if (route === '#/billing') pageTitle = 'Billing';
+    else if (route === '#/settings') pageTitle = 'Settings';
+    else if (route.startsWith('#/agent/')) pageTitle = 'Agent Detail';
+
+    container.innerHTML = `
+      <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-brand-icon">${LOGO_SVG}</div>
+            <div class="sidebar-brand-name">Croutons Agents</div>
+          </div>
+          <nav class="sidebar-nav">
+            <div class="sidebar-section-label">Navigation</div>
+            ${navItems.map(item => `
+              <a href="${item.hash}" class="${activeHash === item.hash ? 'active' : ''}">
+                <i data-lucide="${item.icon}"></i>
+                <span>${item.label}</span>
+              </a>
+            `).join('')}
+          </nav>
+          <div class="sidebar-footer">
+            <div class="sidebar-user">
+              <div class="sidebar-user-avatar">${userInitial}</div>
+              <div class="sidebar-user-info">
+                <div class="sidebar-user-name">${escapeHtml(userName)}</div>
+                <div class="sidebar-user-email">${escapeHtml(userEmail)}</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <header class="header">
+          <div class="header-left">
+            <button class="hamburger" id="hamburger-btn" onclick="window.NC.toggleSidebar()">
+              <i data-lucide="menu"></i>
+            </button>
+            <span class="header-title">${escapeHtml(pageTitle)}</span>
+          </div>
+          <div class="header-right">
+            <button class="btn btn-ghost btn-sm" id="logout-btn">
+              <i data-lucide="log-out"></i>
+              Sign Out
+            </button>
+          </div>
+        </header>
+
+        <main class="main-content app-bg" id="main-content">
+          <div class="loading-center"><div class="loading-spinner"></div></div>
+        </main>
+      </div>`;
+
+    // Bind logout
+    document.getElementById('logout-btn')?.addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      currentSession = null;
+      cachedProfile = null;
+      navigate('#/login');
+    });
+
+    // Fetch profile if needed, then render page content
+    ensureProfile().then(() => {
+      renderPageContent(route);
+    });
+  }
+
+  async function ensureProfile() {
+    if (cachedProfile) return;
+    try {
+      cachedProfile = await apiFetch('/api/profile');
+    } catch (err) {
+      // Profile might not exist yet for new users, that's ok
+      cachedProfile = {
+        email: currentSession?.user?.email || '',
+        display_name: currentSession?.user?.user_metadata?.display_name || '',
+        plan: 'free',
+        api_calls_this_month: 0,
+        api_calls_limit: 100,
+      };
+    }
+  }
+
+  // ── PAGE CONTENT ROUTER ────────────────────
+  function renderPageContent(route) {
+    const main = document.getElementById('main-content');
+    if (!main) return;
+
+    if (route === '#/dashboard') renderDashboard(main);
+    else if (route === '#/command-center') renderCommandCenter(main);
+    else if (route === '#/agents') renderAgents(main);
+    else if (route === '#/wizard') renderWizard(main);
+    else if (route === '#/templates') renderTemplates(main);
+    else if (route === '#/connections') renderConnections(main);
+    else if (route === '#/billing') renderBilling(main);
+    else if (route === '#/settings') renderSettings(main);
+    else if (route.startsWith('#/agent/')) {
+      const params = getRouteParams('#/agent/:id', route);
+      if (params) renderAgentDetail(main, params.id);
+      else renderDashboard(main);
+    }
+    else renderDashboard(main);
+  }
+
+  // ── DASHBOARD VIEW ─────────────────────────
+  async function renderDashboard(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/dashboard');
+      const plan = data.current_plan || 'free';
+      const callsPct = data.api_calls_limit > 0 ? Math.min((data.api_calls_this_month / data.api_calls_limit) * 100, 100) : 0;
+      const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Overview of your AI agents and usage</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Agents</div>
+            <div class="kpi-value">${data.total_agents}</div>
+            <div class="kpi-meta">${data.active_agents} active</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Active Runs</div>
+            <div class="kpi-value">${data.active_runs}</div>
+            <div class="kpi-meta">Currently running</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">API Calls</div>
+            <div class="kpi-value">${data.api_calls_this_month}<span style="font-size:14px;color:var(--color-text-muted)">/${data.api_calls_limit}</span></div>
+            <div style="margin-top:8px">
+              <div class="progress-bar"><div class="progress-bar-fill ${pctClass}" style="width:${callsPct}%"></div></div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Current Plan</div>
+            <div class="kpi-value" style="font-size:22px;text-transform:capitalize">${plan}</div>
+            <div class="kpi-meta"><span class="badge badge-${plan}">${plan}</span></div>
+          </div>
+        </div>
+
+        ${data.total_agents === 0 ? `
+          <div class="card" style="text-align:center;padding:48px 24px;margin-bottom:24px">
+            <div class="empty-state-icon" style="margin:0 auto 16px"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
+            <h3 class="empty-state-title">Create Your First Agent</h3>
+            <p class="empty-state-desc">Deploy an AI agent to automate your workflow. Choose from templates or build from scratch.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Get Started</a>
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Recent Activity</h3>
+          </div>
+          ${data.recent_runs.length === 0
+            ? `<p class="text-sm text-muted" style="padding:16px 0">No recent activity yet. Run an agent to see results here.</p>`
+            : `<table class="runs-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.recent_runs.map(run => `
+                    <tr>
+                      <td><strong>${escapeHtml(run.agent_id?.substring(0, 8) || '—')}</strong></td>
+                      <td><span class="badge badge-${run.status}">${run.status}</span></td>
+                      <td>${run.total_tokens || '—'}</td>
+                      <td>${timeAgo(run.started_at)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+          }
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load dashboard</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="window.NC.render()">Retry</button></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── COMMAND CENTER ────────────────────────
+  let ccActiveTab = 'overview';
+  let ccCharts = {};
+
+  async function renderCommandCenter(container) {
+    const tabs = [
+      { id: 'overview', label: 'Overview', icon: 'gauge' },
+      { id: 'seo', label: 'SEO Metrics', icon: 'search' },
+      { id: 'ai-visibility', label: 'AI Visibility', icon: 'eye' },
+      { id: 'llm-conversions', label: 'LLM Conversions', icon: 'trending-up' },
+      { id: 'competitors', label: 'Competitors', icon: 'swords' },
+      { id: 'agent-ops', label: 'Agent Ops', icon: 'activity' },
+    ];
+
+    container.innerHTML = `
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#00c8ff 0%,#7c3aed 100%);display:flex;align-items:center;justify-content:center">
+            <i data-lucide="radar" style="width:20px;height:20px;color:#fff"></i>
+          </div>
+          <div>
+            <h1 class="page-title" style="margin:0">Command Center</h1>
+            <p class="page-subtitle" style="margin:0">SEO, AEO, GEO &amp; Agent Intelligence</p>
+          </div>
+        </div>
+      </div>
+      <div class="cc-tabs">
+        ${tabs.map(t => `
+          <button class="cc-tab ${ccActiveTab === t.id ? 'cc-tab-active' : ''}" data-tab="${t.id}">
+            <i data-lucide="${t.icon}" style="width:14px;height:14px"></i>
+            <span>${t.label}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div id="cc-content" class="cc-content"></div>
+    `;
+
+    // Bind tab clicks
+    container.querySelectorAll('.cc-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ccActiveTab = btn.dataset.tab;
+        // Destroy existing charts
+        Object.values(ccCharts).forEach(c => { try { c.destroy(); } catch(e){} });
+        ccCharts = {};
+        renderCommandCenter(container);
+      });
+    });
+
+    lucide.createIcons();
+    const ccEl = document.getElementById('cc-content');
+    if (!ccEl) return;
+
+    if (ccActiveTab === 'overview') await renderCCOverview(ccEl);
+    else if (ccActiveTab === 'seo') await renderCCSEO(ccEl);
+    else if (ccActiveTab === 'ai-visibility') renderCCAIVisibility(ccEl);
+    else if (ccActiveTab === 'llm-conversions') renderCCLLMConversions(ccEl);
+    else if (ccActiveTab === 'competitors') renderCCCompetitors(ccEl);
+    else if (ccActiveTab === 'agent-ops') await renderCCAgentOps(ccEl);
+  }
+
+  // ── CC: OVERVIEW TAB ──
+  async function renderCCOverview(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/overview');
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="plug" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.service_count}</div>
+              <div class="cc-kpi-label">Connected Services</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="bot" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.agents.total}</div>
+              <div class="cc-kpi-label">Agents <span class="badge badge-active">${data.agents.active} active</span></div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${(data.agents.total_tokens || 0).toLocaleString()}</div>
+              <div class="cc-kpi-label">Total Tokens</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">$${(data.cost_total_usd || 0).toFixed(4)}</div>
+              <div class="cc-kpi-label">Total Cost (recent)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Connected Services</h3></div>
+            <div class="cc-services-list">
+              ${data.connected_services.length === 0
+                ? '<p class="text-sm text-muted" style="padding:12px 0">No services connected. Go to <a href="#/connections">Connections</a> to set up.</p>'
+                : data.connected_services.map(s => `
+                    <div class="cc-service-item">
+                      <span class="cc-service-dot cc-service-dot-active"></span>
+                      <span>${escapeHtml(s.replace(/_/g, ' '))}</span>
+                    </div>
+                  `).join('')
+              }
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Recent Activity</h3></div>
+            ${data.recent_runs.length === 0
+              ? '<p class="text-sm text-muted" style="padding:12px 0">No recent runs yet.</p>'
+              : `<div class="cc-activity-list">
+                  ${data.recent_runs.slice(0, 8).map(r => `
+                    <div class="cc-activity-item">
+                      <span class="badge badge-${r.status}" style="font-size:10px">${r.status}</span>
+                      <span class="cc-activity-text">${escapeHtml(r.input_preview || '—')}</span>
+                      <span class="cc-activity-meta">${r.total_tokens || 0} tok · ${timeAgo(r.started_at)}</span>
+                    </div>
+                  `).join('')}
+                </div>`
+            }
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Quick Navigation</h3></div>
+          <div class="cc-quick-nav">
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=seo]').click()"><i data-lucide="search" style="width:16px;height:16px"></i>SEO Metrics</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=ai-visibility]').click()"><i data-lucide="eye" style="width:16px;height:16px"></i>AI Visibility</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=llm-conversions]').click()"><i data-lucide="trending-up" style="width:16px;height:16px"></i>LLM Conversions</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=competitors]').click()"><i data-lucide="swords" style="width:16px;height:16px"></i>Competitors</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=agent-ops]').click()"><i data-lucide="activity" style="width:16px;height:16px"></i>Agent Ops</button>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CC: SEO TAB ──
+  async function renderCCSEO(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/seo');
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="trending-up" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.domain_authority}</div>
+              <div class="cc-kpi-label">Domain Authority</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="globe" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.organic_traffic.toLocaleString()}</div>
+              <div class="cc-kpi-label">Organic Traffic</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="key" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.keywords_ranking}</div>
+              <div class="cc-kpi-label">Keywords Ranking</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="link" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.backlinks.toLocaleString()}</div>
+              <div class="cc-kpi-label">Backlinks</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Top Organic Keywords</h3></div>
+            <table class="runs-table">
+              <thead><tr><th>Keyword</th><th>Position</th><th>Volume</th><th>Difficulty</th></tr></thead>
+              <tbody>
+                ${data.top_keywords.map(k => `
+                  <tr>
+                    <td>${escapeHtml(k.keyword)}</td>
+                    <td><strong>#${k.position}</strong></td>
+                    <td>${k.volume.toLocaleString()}</td>
+                    <td>${k.difficulty}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Core Web Vitals</h3></div>
+            <div style="padding:8px 0">
+              ${Object.entries(data.core_web_vitals).map(([k, v]) => `
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--color-border)">
+                  <span class="text-sm">${k}</span>
+                  <span class="text-sm" style="font-weight:600;color:${v.startsWith('Good') ? '#10b981' : '#f59e0b'}">${v}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CC: AI VISIBILITY TAB ──
+  function renderCCAIVisibility(el) {
+    const mockData = {
+      overallScore: 72,
+      trend: '+8% this month',
+      llmPresence: [
+        { llm: 'ChatGPT', mentions: 142, sentiment: 0.78, rank: 1 },
+        { llm: 'Claude', mentions: 89, sentiment: 0.82, rank: 2 },
+        { llm: 'Gemini', mentions: 61, sentiment: 0.71, rank: 3 },
+        { llm: 'Perplexity', mentions: 34, sentiment: 0.75, rank: 4 },
+      ],
+      topQueries: [
+        'best AI agent platforms',
+        'automate business workflows AI',
+        'no-code AI automation tools',
+        'AI agent scheduling software',
+      ],
+      citations: { total: 326, thisWeek: 47, growth: '+14%' },
+    };
+
+    el.innerHTML = `
+      <div class="cc-kpi-grid">
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.12);color:#00c8ff"><i data-lucide="eye" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.overallScore}<span style="font-size:14px">/100</span></div>
+            <div class="cc-kpi-label">AI Visibility Score <span style="color:#10b981">${mockData.trend}</span></div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.12);color:#7c3aed"><i data-lucide="quote" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.citations.total}</div>
+            <div class="cc-kpi-label">Total Citations <span style="color:#10b981">${mockData.citations.growth}</span></div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.12);color:#10b981"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.citations.thisWeek}</div>
+            <div class="cc-kpi-label">Citations This Week</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.12);color:#f59e0b"><i data-lucide="message-square" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.llmPresence.reduce((s,l) => s+l.mentions, 0)}</div>
+            <div class="cc-kpi-label">Total LLM Mentions</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">LLM Presence Breakdown</h3></div>
+          <table class="runs-table">
+            <thead><tr><th>LLM</th><th>Mentions</th><th>Sentiment</th><th>Rank</th></tr></thead>
+            <tbody>
+              ${mockData.llmPresence.map(l => `
+                <tr>
+                  <td><strong>${l.llm}</strong></td>
+                  <td>${l.mentions}</td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div style="flex:1;background:var(--color-border);border-radius:4px;height:6px">
+                        <div style="width:${Math.round(l.sentiment*100)}%;height:6px;border-radius:4px;background:#10b981"></div>
+                      </div>
+                      <span>${Math.round(l.sentiment*100)}%</span>
+                    </div>
+                  </td>
+                  <td>#${l.rank}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Top AI Queries You Appear In</h3></div>
+          <div style="padding:8px 0">
+            ${mockData.topQueries.map((q, i) => `
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--color-border)">
+                <span style="width:24px;height:24px;border-radius:50%;background:rgba(0,200,255,0.1);color:#00c8ff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i+1}</span>
+                <span class="text-sm">${escapeHtml(q)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: LLM CONVERSIONS TAB ──
+  function renderCCLLMConversions(el) {
+    const mockData = {
+      totalConversions: 847,
+      conversionRate: 3.4,
+      avgOrderValue: 127,
+      totalRevenue: 107569,
+      topSources: [
+        { source: 'ChatGPT', visits: 1240, conversions: 89, revenue: 11303, rate: 7.2 },
+        { source: 'Claude', visits: 876, conversions: 54, revenue: 6858, rate: 6.2 },
+        { source: 'Perplexity', visits: 654, conversions: 38, revenue: 4826, rate: 5.8 },
+        { source: 'Gemini', visits: 432, conversions: 19, revenue: 2413, rate: 4.4 },
+      ],
+      recentConversions: [
+        { source: 'ChatGPT', action: 'signup', value: 99, time: '2m ago' },
+        { source: 'Claude', action: 'upgrade', value: 299, time: '8m ago' },
+        { source: 'Perplexity', action: 'signup', value: 99, time: '15m ago' },
+        { source: 'ChatGPT', action: 'signup', value: 99, time: '23m ago' },
+      ],
+    };
+
+    el.innerHTML = `
+      <div class="cc-kpi-grid">
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.12);color:#10b981"><i data-lucide="trending-up" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.totalConversions}</div>
+            <div class="cc-kpi-label">Total LLM Conversions</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.12);color:#00c8ff"><i data-lucide="percent" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.conversionRate}%</div>
+            <div class="cc-kpi-label">Avg Conversion Rate</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.12);color:#7c3aed"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">$${mockData.avgOrderValue}</div>
+            <div class="cc-kpi-label">Avg Order Value</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.12);color:#f59e0b"><i data-lucide="bar-chart" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">$${(mockData.totalRevenue/1000).toFixed(1)}k</div>
+            <div class="cc-kpi-label">Revenue from LLM Traffic</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Conversions by LLM Source</h3></div>
+          <table class="runs-table">
+            <thead><tr><th>Source</th><th>Visits</th><th>Conv.</th><th>Rate</th><th>Revenue</th></tr></thead>
+            <tbody>
+              ${mockData.topSources.map(s => `
+                <tr>
+                  <td><strong>${s.source}</strong></td>
+                  <td>${s.visits.toLocaleString()}</td>
+                  <td>${s.conversions}</td>
+                  <td><span style="color:#10b981;font-weight:600">${s.rate}%</span></td>
+                  <td>$${s.revenue.toLocaleString()}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Recent Conversions</h3></div>
+          <div class="cc-activity-list">
+            ${mockData.recentConversions.map(c => `
+              <div class="cc-activity-item">
+                <span class="badge badge-success" style="font-size:10px">${c.action}</span>
+                <span class="cc-activity-text">via ${c.source}</span>
+                <span class="cc-activity-meta">$${c.value} · ${c.time}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: COMPETITORS TAB ──
+  function renderCCCompetitors(el) {
+    const mockData = [
+      { name: 'Zapier', da: 91, traffic: 4200000, keywords: 180000, aiScore: 88, trend: '+2%' },
+      { name: 'Make.com', da: 78, traffic: 890000, keywords: 52000, aiScore: 71, trend: '+5%' },
+      { name: 'n8n.io', da: 65, traffic: 340000, keywords: 28000, aiScore: 63, trend: '+12%' },
+      { name: 'Activepieces', da: 48, traffic: 120000, keywords: 11000, aiScore: 55, trend: '+19%' },
+      { name: 'YOU', da: 32, traffic: 45000, keywords: 4800, aiScore: 72, trend: '+31%' },
+    ];
+
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3 class="card-title">Competitive Landscape</h3></div>
+        <table class="runs-table">
+          <thead>
+            <tr>
+              <th>Competitor</th>
+              <th>Domain Authority</th>
+              <th>Est. Traffic</th>
+              <th>Keywords</th>
+              <th>AI Score</th>
+              <th>Growth</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${mockData.map(c => `
+              <tr style="${c.name === 'YOU' ? 'background:rgba(0,200,255,0.05);font-weight:600' : ''}">
+                <td>${c.name === 'YOU' ? `<span style="color:#00c8ff">⭐ ${c.name}</span>` : c.name}</td>
+                <td>${c.da}</td>
+                <td>${c.traffic.toLocaleString()}</td>
+                <td>${c.keywords.toLocaleString()}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="flex:1;background:var(--color-border);border-radius:4px;height:6px">
+                      <div style="width:${c.aiScore}%;height:6px;border-radius:4px;background:${c.name === 'YOU' ? '#00c8ff' : '#7c3aed'}"></div>
+                    </div>
+                    <span>${c.aiScore}</span>
+                  </div>
+                </td>
+                <td style="color:#10b981">${c.trend}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Your Competitive Advantages</h3></div>
+        <div style="padding:8px 0">
+          <div style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+            <div style="font-weight:600;margin-bottom:4px;color:#10b981">Highest Growth Rate (+31%)</div>
+            <div class="text-sm text-muted">You're growing faster than all tracked competitors.</div>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+            <div style="font-weight:600;margin-bottom:4px;color:#00c8ff">Superior AI Visibility (72/100)</div>
+            <div class="text-sm text-muted">Your AI Score exceeds n8n, Activepieces, and Make.com.</div>
+          </div>
+          <div style="padding:12px 0">
+            <div style="font-weight:600;margin-bottom:4px;color:#7c3aed">Niche Keyword Opportunities</div>
+            <div class="text-sm text-muted">4,800 targeted keywords with less competition than Zapier.</div>
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: AGENT OPS TAB ──
+  async function renderCCAgentOps(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/agent-ops');
+
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="check-circle" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.success_rate}%</div>
+              <div class="cc-kpi-label">Success Rate</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${(data.total_tokens || 0).toLocaleString()}</div>
+              <div class="cc-kpi-label">Total Tokens Used</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="activity" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.total_runs}</div>
+              <div class="cc-kpi-label">Total Runs</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">$${(data.total_cost_usd || 0).toFixed(4)}</div>
+              <div class="cc-kpi-label">Total Cost</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Agent Performance</h3></div>
+            <table class="runs-table">
+              <thead><tr><th>Agent</th><th>Runs</th><th>Success</th><th>Tokens</th></tr></thead>
+              <tbody>
+                ${data.top_agents.map(a => `
+                  <tr>
+                    <td><strong>${escapeHtml(a.name)}</strong></td>
+                    <td>${a.runs}</td>
+                    <td><span class="badge badge-${a.success_rate > 90 ? 'success' : 'warning'}">${a.success_rate}%</span></td>
+                    <td>${(a.tokens || 0).toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Status Breakdown</h3></div>
+            <div style="padding:8px 0">
+              ${Object.entries(data.status_breakdown).map(([status, count]) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--color-border)">
+                  <span class="badge badge-${status}">${status}</span>
+                  <span class="text-sm" style="font-weight:600">${count}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── AGENTS VIEW ────────────────────────────
+  async function renderAgents(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const agents = await apiFetch('/api/agents');
+
+      let html = `
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">My Agents</h1>
+            <p class="page-subtitle">${agents.length} agent${agents.length !== 1 ? 's' : ''} configured</p>
+          </div>
+          <a href="#/wizard" class="btn btn-primary"><i data-lucide="plus"></i> New Agent</a>
+        </div>`;
+
+      if (agents.length === 0) {
+        html += `
+          <div class="empty-state">
+            <div class="empty-state-icon"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
+            <h3 class="empty-state-title">No agents yet</h3>
+            <p class="empty-state-desc">Create your first AI agent to start automating workflows.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Create Agent</a>
+          </div>`;
+      } else {
+        html += '<div class="agents-grid">';
+        for (const agent of agents) {
+          html += agentCard(agent);
+        }
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+      lucide.createIcons();
+      bindAgentCardEvents(container);
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load agents</h3><p>${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="window.NC.render()">Retry</button></div>`;
+    }
+  }
+
+  function agentCard(agent) {
+    const status = agent.status || 'idle';
+    const model = agent.model || 'gpt-4o-mini';
+    const schedule = agent.schedule || '—';
+    return `
+      <div class="agent-card" data-agent-id="${agent.id}">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">${escapeHtml(agent.name)}</div>
+            <span class="badge badge-${status}">${status}</span>
+          </div>
+          <div class="agent-card-actions">
+            <button class="btn btn-ghost btn-sm" data-action="run" data-id="${agent.id}">
+              <i data-lucide="play"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="view" data-id="${agent.id}">
+              <i data-lucide="eye"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="delete" data-id="${agent.id}">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </div>
+        <p class="agent-card-desc">${escapeHtml(agent.description || '—')}</p>
+        <div class="agent-card-meta">
+          <span><i data-lucide="cpu" style="width:12px;height:12px"></i> ${escapeHtml(model)}</span>
+          <span><i data-lucide="clock" style="width:12px;height:12px"></i> ${escapeHtml(schedule)}</span>
+        </div>
+      </div>`;
+  }
+
+  function bindAgentCardEvents(container) {
+    container.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (action === 'run') {
+          btn.disabled = true;
+          try {
+            await apiFetch(`/api/agents/${id}/run`, { method: 'POST' });
+            toast('Agent run started', 'success');
+          } catch (err) { toast(err.message, 'error'); }
+          finally { btn.disabled = false; }
+        } else if (action === 'view') {
+          navigate(`#/agent/${id}`);
+        } else if (action === 'delete') {
+          if (!confirm('Delete this agent?')) return;
+          try {
+            await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+            toast('Agent deleted', 'success');
+            renderAgents(container);
+          } catch (err) { toast(err.message, 'error'); }
+        }
+      });
+    });
+
+    container.querySelectorAll('.agent-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-action]')) {
+          navigate(`#/agent/${card.dataset.agentId}`);
+        }
+      });
+    });
+  }
+
+  // ── AGENT DETAIL VIEW ──────────────────────
+  async function renderAgentDetail(container, agentId) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const agent = await apiFetch(`/api/agents/${agentId}`);
+      const runs = await apiFetch(`/api/agents/${agentId}/runs?limit=20`);
+
+      container.innerHTML = `
+        <div class="page-header">
+          <div>
+            <button class="btn btn-ghost btn-sm" onclick="navigate('#/agents')" style="margin-bottom:8px">
+              <i data-lucide="arrow-left"></i> Back
+            </button>
+            <h1 class="page-title">${escapeHtml(agent.name)}</h1>
+            <p class="page-subtitle">${escapeHtml(agent.description || '—')}</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="run-agent-btn">
+              <i data-lucide="play"></i> Run Now
+            </button>
+            <button class="btn btn-danger" id="delete-agent-btn">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="agent-detail-grid">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Configuration</h3></div>
+            <div class="agent-detail-config">
+              <div class="config-row"><span class="config-label">Status</span><span class="badge badge-${agent.status}">${agent.status}</span></div>
+              <div class="config-row"><span class="config-label">Model</span><span>${escapeHtml(agent.model || 'gpt-4o-mini')}</span></div>
+              <div class="config-row"><span class="config-label">Schedule</span><span>${escapeHtml(agent.schedule || 'Manual')}</span></div>
+              <div class="config-row"><span class="config-label">Temperature</span><span>${agent.temperature ?? 0.7}</span></div>
+              <div class="config-row"><span class="config-label">Max Tokens</span><span>${agent.max_tokens ?? 1024}</span></div>
+              <div class="config-row"><span class="config-label">Created</span><span>${formatDate(agent.created_at)}</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Goals</h3></div>
+            ${!agent.goals?.length
+              ? '<p class="text-sm text-muted">No goals defined.</p>'
+              : `<ul class="goals-list">${agent.goals.map(g => `<li>${escapeHtml(g)}</li>`).join('')}</ul>`
+            }
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header">
+            <h3 class="card-title">Run History</h3>
+            <span class="badge">${runs.length} runs</span>
+          </div>
+          ${runs.length === 0
+            ? '<p class="text-sm text-muted" style="padding:16px 0">No runs yet.</p>'
+            : `<table class="runs-table">
+                <thead><tr><th>Status</th><th>Input</th><th>Tokens</th><th>Cost</th><th>Started</th><th>Duration</th></tr></thead>
+                <tbody>
+                  ${runs.map(r => `
+                    <tr>
+                      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+                      <td class="text-sm">${escapeHtml((r.input_preview || r.input || '—').substring(0, 60))}</td>
+                      <td>${r.total_tokens || '—'}</td>
+                      <td>${r.cost_usd ? '$' + r.cost_usd.toFixed(4) : '—'}</td>
+                      <td>${timeAgo(r.started_at)}</td>
+                      <td>${r.duration_ms ? Math.round(r.duration_ms / 1000) + 's' : '—'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+          }
+        </div>
+      `;
+
+      document.getElementById('run-agent-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('run-agent-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader"></i> Running...';
+        lucide.createIcons();
+        try {
+          await apiFetch(`/api/agents/${agentId}/run`, { method: 'POST' });
+          toast('Agent run started', 'success');
+          setTimeout(() => renderAgentDetail(container, agentId), 2000);
+        } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+      });
+
+      document.getElementById('delete-agent-btn')?.addEventListener('click', async () => {
+        if (!confirm('Delete this agent and all its runs?')) return;
+        try {
+          await apiFetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+          toast('Agent deleted', 'success');
+          navigate('#/agents');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load agent</h3><p>${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="navigate('#/agents')">Back to Agents</button></div>`;
+    }
+  }
+
+  // ── WIZARD ─────────────────────────────────
+  async function renderWizard(container) {
+    wizardStep = 0;
+    wizardData = {
+      template_id: null, templateObj: null, name: '', description: '',
+      goals: [], connections: [], model: 'gpt-4o-mini',
+      temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [],
+    };
+    await renderWizardStep(container);
+  }
+
+  async function renderWizardStep(container) {
+    const steps = ['Template', 'Name & Goals', 'Connections', 'Configure', 'Review'];
+    const stepHtml = steps.map((s, i) => `
+      <div class="wizard-step ${i < wizardStep ? 'done' : i === wizardStep ? 'active' : ''}">
+        <div class="wizard-step-dot">${i < wizardStep ? '<i data-lucide="check" style="width:10px;height:10px"></i>' : i + 1}</div>
+        <div class="wizard-step-label">${s}</div>
+      </div>
+    `).join('<div class="wizard-connector"></div>');
+
+    let body = '';
+    if (wizardStep === 0) body = await wizardStep0();
+    else if (wizardStep === 1) body = wizardStep1();
+    else if (wizardStep === 2) body = await wizardStep2();
+    else if (wizardStep === 3) body = wizardStep3();
+    else if (wizardStep === 4) body = wizardStep4();
+
+    container.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title">Create Agent</h1>
+        <p class="page-subtitle">Follow the steps to configure your AI agent</p>
+      </div>
+      <div class="wizard-container">
+        <div class="wizard-progress">${stepHtml}</div>
+        <div class="wizard-body" id="wizard-body">${body}</div>
+        <div class="wizard-footer" id="wizard-footer">
+          ${wizardStep > 0 ? '<button class="btn btn-ghost" id="wizard-back">Back</button>' : '<div></div>'}
+          <button class="btn btn-primary" id="wizard-next">
+            ${wizardStep === 4 ? 'Create Agent' : 'Next'}
+          </button>
+        </div>
+      </div>`;
+
+    lucide.createIcons();
+    bindWizardEvents(container);
+  }
+
+  async function wizardStep0() {
+    try {
+      const templates = await apiFetch('/api/templates');
+      return `
+        <h2 class="wizard-section-title">Choose a Template</h2>
+        <p class="wizard-section-desc">Start from a pre-built template or create from scratch.</p>
+        <div class="templates-grid">
+          <div class="template-card ${wizardData.template_id === null && !wizardData.templateObj ? 'selected' : ''}" data-tid="">
+            <div class="template-icon"><i data-lucide="wand" style="width:22px;height:22px"></i></div>
+            <div class="template-name">Blank</div>
+            <div class="template-desc">Build from scratch with custom goals and config.</div>
+          </div>
+          ${templates.map(t => `
+            <div class="template-card ${wizardData.template_id === t.id ? 'selected' : ''}" data-tid="${t.id}">
+              <div class="template-icon"><i data-lucide="${t.icon || 'bot'}" style="width:22px;height:22px"></i></div>
+              <div class="template-name">${escapeHtml(t.name)}</div>
+              <div class="template-desc">${escapeHtml(t.description || '')}</div>
+            </div>
+          `).join('')}
+        </div>`;
+    } catch (err) {
+      return `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  function wizardStep1() {
+    return `
+      <h2 class="wizard-section-title">Name Your Agent</h2>
+      <div class="wizard-field">
+        <label class="form-label">Agent Name <span class="form-required">*</span></label>
+        <input type="text" class="form-input" id="w-name" value="${escapeHtml(wizardData.name)}" placeholder="e.g. Daily SEO Monitor" required>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Description</label>
+        <textarea class="form-input" id="w-desc" rows="3" placeholder="What does this agent do?">${escapeHtml(wizardData.description)}</textarea>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Goals <span class="form-hint">(one per line)</span></label>
+        <textarea class="form-input" id="w-goals" rows="4" placeholder="Monitor keyword rankings daily&#10;Alert on ranking drops > 5 positions">${wizardData.goals.join('\n')}</textarea>
+      </div>`;
+  }
+
+  async function wizardStep2() {
+    try {
+      const conns = await apiFetch('/api/connections');
+      const connected = conns.filter(c => c.status === 'connected');
+      return `
+        <h2 class="wizard-section-title">Add Connections</h2>
+        <p class="wizard-section-desc">Choose which services this agent can access.</p>
+        ${connected.length === 0
+          ? `<div class="card" style="text-align:center;padding:24px">
+               <p class="text-sm text-muted">No connections yet. <a href="#/connections">Set up connections</a> first.</p>
+             </div>`
+          : `<div class="connections-check-list">
+               ${connected.map(c => `
+                 <label class="connection-check-item">
+                   <input type="checkbox" value="${c.service}" ${wizardData.connections.includes(c.service) ? 'checked' : ''}>
+                   <span>${escapeHtml(c.service)}</span>
+                 </label>
+               `).join('')}
+             </div>`
+        }`;
+    } catch (err) {
+      return `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  function wizardStep3() {
+    const models = [
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini', desc: 'Fast and affordable' },
+      { id: 'gpt-4o', label: 'GPT-4o', desc: 'Powerful and accurate' },
+      { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', desc: 'Efficient and capable' },
+      { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', desc: 'Highly capable' },
+    ];
+    const schedules = [
+      { id: 'manual', label: 'Manual only' },
+      { id: 'hourly', label: 'Every hour' },
+      { id: 'daily', label: 'Daily' },
+      { id: 'weekly', label: 'Weekly' },
+    ];
+    return `
+      <h2 class="wizard-section-title">Configure Agent</h2>
+      <div class="wizard-field">
+        <label class="form-label">Model</label>
+        <div class="model-select-grid">
+          ${models.map(m => `
+            <label class="model-option ${wizardData.model === m.id ? 'selected' : ''}">
+              <input type="radio" name="model" value="${m.id}" ${wizardData.model === m.id ? 'checked' : ''}>
+              <div>
+                <div style="font-weight:600;font-size:13px">${m.label}</div>
+                <div style="font-size:11px;color:var(--color-text-muted)">${m.desc}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Schedule</label>
+        <select class="form-input form-select" id="w-schedule">
+          ${schedules.map(s => `<option value="${s.id}" ${wizardData.schedule === s.id ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="wizard-2col">
+        <div class="wizard-field">
+          <label class="form-label">Temperature <span id="temp-val">${wizardData.temperature}</span></label>
+          <input type="range" class="form-range" id="w-temp" min="0" max="1" step="0.1" value="${wizardData.temperature}">
+        </div>
+        <div class="wizard-field">
+          <label class="form-label">Max Tokens</label>
+          <input type="number" class="form-input" id="w-tokens" value="${wizardData.max_tokens}" min="64" max="8192" step="64">
+        </div>
+      </div>`;
+  }
+
+  function wizardStep4() {
+    return `
+      <h2 class="wizard-section-title">Review &amp; Create</h2>
+      <div class="review-grid">
+        <div class="review-item"><span class="review-label">Name</span><span>${escapeHtml(wizardData.name || '—')}</span></div>
+        <div class="review-item"><span class="review-label">Template</span><span>${escapeHtml(wizardData.templateObj?.name || 'Blank')}</span></div>
+        <div class="review-item"><span class="review-label">Model</span><span>${escapeHtml(wizardData.model)}</span></div>
+        <div class="review-item"><span class="review-label">Schedule</span><span>${escapeHtml(wizardData.schedule)}</span></div>
+        <div class="review-item"><span class="review-label">Temperature</span><span>${wizardData.temperature}</span></div>
+        <div class="review-item"><span class="review-label">Max Tokens</span><span>${wizardData.max_tokens}</span></div>
+        <div class="review-item"><span class="review-label">Goals</span><span>${wizardData.goals.length} goal${wizardData.goals.length !== 1 ? 's' : ''}</span></div>
+        <div class="review-item"><span class="review-label">Connections</span><span>${wizardData.connections.length} selected</span></div>
+      </div>`;
+  }
+
+  function bindWizardEvents(container) {
+    // Template selection
+    container.querySelectorAll('.template-card').forEach(card => {
+      card.addEventListener('click', () => {
+        container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        wizardData.template_id = card.dataset.tid || null;
+      });
+    });
+
+    // Temp slider
+    const tempSlider = document.getElementById('w-temp');
+    if (tempSlider) {
+      tempSlider.addEventListener('input', () => {
+        document.getElementById('temp-val').textContent = tempSlider.value;
+      });
+    }
+
+    // Model radio
+    container.querySelectorAll('input[name="model"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        container.querySelectorAll('.model-option').forEach(o => o.classList.remove('selected'));
+        radio.closest('.model-option').classList.add('selected');
+      });
+    });
+
+    // Back button
+    document.getElementById('wizard-back')?.addEventListener('click', () => {
+      wizardStep--;
+      renderWizardStep(container);
+    });
+
+    // Next button
+    document.getElementById('wizard-next')?.addEventListener('click', async () => {
+      const btn = document.getElementById('wizard-next');
+
+      if (wizardStep === 1) {
+        const name = document.getElementById('w-name')?.value.trim();
+        if (!name) { toast('Agent name is required', 'error'); return; }
+        wizardData.name = name;
+        wizardData.description = document.getElementById('w-desc')?.value.trim() || '';
+        const goalsRaw = document.getElementById('w-goals')?.value || '';
+        wizardData.goals = goalsRaw.split('\n').map(g => g.trim()).filter(Boolean);
+      } else if (wizardStep === 2) {
+        wizardData.connections = [...container.querySelectorAll('.connection-check-item input:checked')].map(i => i.value);
+      } else if (wizardStep === 3) {
+        wizardData.model = container.querySelector('input[name="model"]:checked')?.value || 'gpt-4o-mini';
+        wizardData.schedule = document.getElementById('w-schedule')?.value || 'daily';
+        wizardData.temperature = parseFloat(document.getElementById('w-temp')?.value || '0.7');
+        wizardData.max_tokens = parseInt(document.getElementById('w-tokens')?.value || '1024');
+      }
+
+      if (wizardStep === 4) {
+        // Create the agent
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        try {
+          const payload = {
+            name: wizardData.name,
+            description: wizardData.description,
+            template_id: wizardData.template_id,
+            goals: wizardData.goals,
+            connections: wizardData.connections,
+            model: wizardData.model,
+            temperature: wizardData.temperature,
+            max_tokens: wizardData.max_tokens,
+            schedule: wizardData.schedule,
+            rules: wizardData.rules,
+          };
+          const agent = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(payload) });
+          toast('Agent created successfully!', 'success');
+          navigate(`#/agent/${agent.id}`);
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.disabled = false;
+          btn.textContent = 'Create Agent';
+        }
+        return;
+      }
+
+      wizardStep++;
+      renderWizardStep(container);
+    });
+  }
+
+  // ── TEMPLATES VIEW ─────────────────────────
+  async function renderTemplates(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const templates = await apiFetch('/api/templates');
+      let html = `
+        <div class="page-header">
+          <h1 class="page-title">Templates</h1>
+          <p class="page-subtitle">${templates.length} ready-to-use agent template${templates.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div class="templates-full-grid">`;
+
+      for (const t of templates) {
+        html += `
+          <div class="template-full-card">
+            <div class="template-full-header">
+              <div class="template-full-icon"><i data-lucide="${t.icon || 'bot'}" style="width:22px;height:22px"></i></div>
+              <div>
+                <div class="template-full-name">${escapeHtml(t.name)}</div>
+                <div class="template-full-category">${escapeHtml(t.category || 'General')}</div>
+              </div>
+            </div>
+            <p class="template-full-desc">${escapeHtml(t.description || '')}</p>
+            ${t.goals?.length ? `
+              <div class="template-full-goals">
+                <div class="text-sm" style="font-weight:600;margin-bottom:4px">Example Goals:</div>
+                <ul style="margin:0;padding-left:16px">
+                  ${t.goals.slice(0, 3).map(g => `<li class="text-sm text-muted">${escapeHtml(g)}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            <a href="#/wizard" class="btn btn-primary btn-sm" style="margin-top:12px" onclick="window.NC.prefillTemplate('${t.id}')">Use Template</a>
+          </div>`;
+      }
+      html += '</div>';
+      container.innerHTML = html;
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load templates</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CONNECTIONS VIEW ───────────────────────
+  async function renderConnections(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const conns = await apiFetch('/api/connections');
+
+      // Build a map of existing connections
+      const connMap = {};
+      for (const c of conns) connMap[c.service] = c;
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Connections</h1>
+          <p class="page-subtitle">Connect your services to use with AI agents</p>
+        </div>
+        <div id="conn-list"></div>`;
+
+      const connEl = document.getElementById('conn-list');
+
+      const services = [
+        { id: 'openai', name: 'OpenAI', icon: 'cpu', desc: 'GPT-4o and other OpenAI models', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk-...'}] },
+        { id: 'anthropic', name: 'Anthropic', icon: 'cpu', desc: 'Claude 3.5 models', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk-ant-...'}] },
+        { id: 'google_analytics', name: 'Google Analytics', icon: 'bar-chart-2', desc: 'Web traffic and behavior analytics', auth: 'oauth', oauthUrl: '/api/oauth/google' },
+        { id: 'google_search_console', name: 'Search Console', icon: 'search', desc: 'SEO performance and keyword data', auth: 'oauth', oauthUrl: '/api/oauth/google' },
+        { id: 'hubspot', name: 'HubSpot', icon: 'users', desc: 'CRM contacts, deals and marketing', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'pat-na1-...'}] },
+        { id: 'stripe', name: 'Stripe', icon: 'credit-card', desc: 'Payment and subscription data', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk_live_...'}] },
+        { id: 'slack', name: 'Slack', icon: 'message-square', desc: 'Team messaging and notifications', auth: 'oauth', oauthUrl: '/api/oauth/slack' },
+        { id: 'github', name: 'GitHub', icon: 'github', desc: 'Repositories, issues and PRs', auth: 'apikey', fields: [{id:'api_key',label:'Personal Access Token',type:'password',placeholder:'ghp_...'}] },
+        { id: 'ahrefs', name: 'Ahrefs', icon: 'link', desc: 'Backlink and keyword analysis', auth: 'apikey', fields: [{id:'api_key',label:'API Token',type:'password',placeholder:'...'}] },
+        { id: 'semrush', name: 'SEMrush', icon: 'trending-up', desc: 'SEO and competitor intelligence', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'...'}] },
+        { id: 'airtable', name: 'Airtable', icon: 'table', desc: 'Database and spreadsheet automation', auth: 'apikey', fields: [{id:'api_key',label:'Personal Access Token',type:'password',placeholder:'patXXX...'}] },
+        { id: 'notion', name: 'Notion', icon: 'file-text', desc: 'Docs and database integration', auth: 'apikey', fields: [{id:'api_key',label:'Integration Token',type:'password',placeholder:'secret_...'}] },
+      ];
+
+      let html = '<div class="connections-grid">';
+      for (const svc of services) {
+        const conn = connMap[svc.id];
+        const isConnected = conn?.status === 'connected';
+        html += `
+          <div class="conn-card">
+            <div class="conn-card-header">
+              <div class="conn-icon"><i data-lucide="${svc.icon}" style="width:20px;height:20px"></i></div>
+              <div>
+                <div class="conn-name">${escapeHtml(svc.name)}</div>
+                <div class="conn-desc">${escapeHtml(svc.desc)}</div>
+              </div>
+            </div>
+            <div class="conn-status">
+              <span class="badge badge-${isConnected ? 'success' : 'idle'}">
+                ${isConnected ? 'Connected' : 'Not connected'}
+              </span>
+            </div>
+            <div class="conn-actions">
+              ${isConnected
+                ? `<button class="btn btn-ghost btn-sm disconnect-btn" data-service="${svc.id}">Disconnect</button>`
+                : svc.auth === 'oauth'
+                  ? `<button class="btn btn-primary btn-sm connect-btn" data-auth="oauth" data-service="${svc.id}" data-name="${svc.name}">Connect</button>`
+                  : `<button class="btn btn-primary btn-sm connect-btn" data-auth="apikey" data-service="${svc.id}" data-name="${svc.name}" data-fields='${JSON.stringify(svc.fields)}'>Connect</button>`
+              }
+            </div>
+          </div>`;
+      }
+      html += '</div>';
+      connEl.innerHTML = html;
+      lucide.createIcons();
+
+      // Bind disconnect
+      connEl.querySelectorAll('.disconnect-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Disconnect this service?')) return;
+          try {
+            await apiFetch(`/api/connections/${btn.dataset.service}`, { method: 'DELETE' });
+            toast('Disconnected', 'success');
+            renderConnections(container);
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      // Bind connect
+      connEl.querySelectorAll('.connect-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const auth = btn.dataset.auth;
+          const service = btn.dataset.service;
+          const name = btn.dataset.name;
+          if (auth === 'oauth') {
+            startOAuthFlow(service, name);
+          } else {
+            const fields = btn.data
