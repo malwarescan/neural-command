@@ -5,1568 +5,2517 @@
 (function () {
   'use strict';
 
-  // ── CONFIG (loaded once, mutated by settings panel) ──────────────────────
-  const CONFIG = {
-    apiBase: '',          // same-origin
-    defaultModel: 'gpt-4o-mini',
-    streamingEnabled: true,
-    maxTokens: 2048,
+  // ── CONFIG (loaded from /api/config) ──────
+  const API = '';
+  let SUPABASE_URL = '';
+  let SUPABASE_ANON_KEY = '';
+  let STRIPE_PK = '';
+
+  // ── SUPABASE CLIENT (initialized after config loads) ──
+  let supabase = null;
+
+  // ── IN-MEMORY STATE ────────────────────────
+  let currentSession = null;
+  let cachedProfile = null;
+  let sidebarOpen = false;
+
+  // Wizard state
+  let wizardStep = 0;
+  let wizardData = {
+    template_id: null,
+    templateObj: null,
+    name: '',
+    description: '',
+    goals: [],
+    connections: [],
+    model: 'gpt-4o-mini',
     temperature: 0.7,
+    max_tokens: 1024,
+    schedule: 'daily',
+    rules: [],
   };
 
-  // ── ROUTER ────────────────────────────────────────────────────────────────
-  const routes = {};
-  function route(hash, fn) { routes[hash] = fn; }
+  // ── LOGO SVG ───────────────────────────────
+  const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NBq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
 
+  // ── HELPERS ────────────────────────────────
+  function $(sel) { return document.querySelector(sel); }
+  function $$(sel) { return document.querySelectorAll(sel); }
+  function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    if (attrs) Object.entries(attrs).forEach(([k, v]) => {
+      if (k === 'className') e.className = v;
+      else if (k === 'innerHTML') e.innerHTML = v;
+      else if (k.startsWith('on')) e.addEventListener(k.slice(2).toLowerCase(), v);
+      else e.setAttribute(k, v);
+    });
+    children.forEach(c => {
+      if (typeof c === 'string') e.appendChild(document.createTextNode(c));
+      else if (c) e.appendChild(c);
+    });
+    return e;
+  }
+
+  function timeAgo(dateStr) {
+    if (!dateStr) return 'Never';
+    const d = new Date(dateStr);
+    const now = new Date();
+    const diff = Math.floor((now - d) / 1000);
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+    if (diff < 2592000) return `${Math.floor(diff / 86400)}d ago`;
+    return d.toLocaleDateString();
+  }
+
+  function formatDate(dateStr) {
+    if (!dateStr) return '—';
+    return new Date(dateStr).toLocaleString();
+  }
+
+  function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+  }
+
+  // ── TOAST ──────────────────────────────────
+  function toast(message, type = 'info') {
+    const container = document.getElementById('toast-container');
+    const t = el('div', { className: `toast toast-${type}` });
+    const iconMap = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+    t.innerHTML = `<i data-lucide="${iconMap[type] || 'info'}"></i><span>${escapeHtml(message)}</span>`;
+    container.appendChild(t);
+    lucide.createIcons({ nodes: [t] });
+    setTimeout(() => {
+      t.classList.add('toast-exit');
+      setTimeout(() => t.remove(), 200);
+    }, 4000);
+  }
+
+  // ── API FETCH HELPER ───────────────────────
+  async function apiFetch(path, options = {}) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (currentSession?.access_token) {
+      headers['Authorization'] = `Bearer ${currentSession.access_token}`;
+    }
+    const resp = await fetch(`${API}${path}`, { ...options, headers: { ...headers, ...options.headers } });
+    const data = await resp.json().catch(() => null);
+    if (!resp.ok) {
+      const msg = data?.detail || `Request failed (${resp.status})`;
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // ── ROUTER ─────────────────────────────────
   function navigate(hash) {
     window.location.hash = hash;
   }
 
-  function dispatch() {
-    const hash = window.location.hash || '#/';
-    const handler = routes[hash] || routes['#/404'] || (() => renderNotFound());
-    handler();
+  function getRoute() {
+    const hash = window.location.hash || '#/login';
+    return hash;
   }
 
-  window.addEventListener('hashchange', dispatch);
-
-  // ── DOM HELPERS ───────────────────────────────────────────────────────────
-  function $(sel, ctx) { return (ctx || document).querySelector(sel); }
-  function $$(sel, ctx) { return [...(ctx || document).querySelectorAll(sel)]; }
-
-  function el(tag, attrs = {}, ...children) {
-    const node = document.createElement(tag);
-    for (const [k, v] of Object.entries(attrs)) {
-      if (k === 'class') node.className = v;
-      else if (k === 'style' && typeof v === 'object') Object.assign(node.style, v);
-      else if (k.startsWith('on')) node.addEventListener(k.slice(2).toLowerCase(), v);
-      else node.setAttribute(k, v);
-    }
-    for (const child of children) {
-      if (child == null) continue;
-      node.appendChild(typeof child === 'string' ? document.createTextNode(child) : child);
-    }
-    return node;
-  }
-
-  function setHTML(node, html) { node.innerHTML = html; }
-
-  function renderMain(contentFn) {
-    const app = $('#app');
-    setHTML(app, '');
-    const wrapper = el('div', { class: 'page-wrapper' });
-    app.appendChild(wrapper);
-    contentFn(wrapper);
-  }
-
-  // ── TOAST ─────────────────────────────────────────────────────────────────
-  function toast(msg, type = 'info', duration = 3500) {
-    let container = $('#toast-container');
-    if (!container) {
-      container = el('div', { id: 'toast-container' });
-      document.body.appendChild(container);
-    }
-    const t = el('div', { class: `toast toast-${type}` }, msg);
-    container.appendChild(t);
-    requestAnimationFrame(() => t.classList.add('show'));
-    setTimeout(() => {
-      t.classList.remove('show');
-      setTimeout(() => t.remove(), 400);
-    }, duration);
-  }
-
-  // ── API ───────────────────────────────────────────────────────────────────
-  async function api(path, opts = {}) {
-    const res = await fetch(CONFIG.apiBase + path, {
-      headers: { 'Content-Type': 'application/json', ...(opts.headers || {}) },
-      ...opts,
-    });
-    if (!res.ok) {
-      const err = await res.text().catch(() => res.statusText);
-      throw new Error(err || `HTTP ${res.status}`);
-    }
-    const ct = res.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return res.json();
-    return res.text();
-  }
-
-  // ── STREAMING ─────────────────────────────────────────────────────────────
-  async function streamChat(payload, onChunk, onDone, onError) {
-    try {
-      const res = await fetch(CONFIG.apiBase + '/api/chat', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...payload, stream: true }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop();
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6).trim();
-            if (data === '[DONE]') { onDone && onDone(); return; }
-            try {
-              const parsed = JSON.parse(data);
-              const chunk = parsed.choices?.[0]?.delta?.content || '';
-              if (chunk) onChunk(chunk);
-            } catch {}
-          }
-        }
+  function getRouteParams(pattern, hash) {
+    // e.g., pattern = '#/agent/:id'
+    const patParts = pattern.split('/');
+    const hashParts = hash.split('/');
+    if (patParts.length !== hashParts.length) return null;
+    const params = {};
+    for (let i = 0; i < patParts.length; i++) {
+      if (patParts[i].startsWith(':')) {
+        params[patParts[i].slice(1)] = hashParts[i];
+      } else if (patParts[i] !== hashParts[i]) {
+        return null;
       }
-      onDone && onDone();
-    } catch (e) {
-      onError && onError(e);
+    }
+    return params;
+  }
+
+  // ── RENDER ENGINE ──────────────────────────
+  function render() {
+    const route = getRoute();
+    const app = document.getElementById('app');
+
+    // Auth routes (no session needed)
+    const authRoutes = ['#/login', '#/signup', '#/forgot'];
+    const isAuthRoute = authRoutes.includes(route);
+
+    if (!currentSession && !isAuthRoute) {
+      navigate('#/login');
+      return;
+    }
+
+    if (currentSession && isAuthRoute) {
+      navigate('#/dashboard');
+      return;
+    }
+
+    if (isAuthRoute) {
+      renderAuthView(route, app);
+    } else {
+      renderAppShell(route, app);
+    }
+
+    // Initialize Lucide icons after render
+    requestAnimationFrame(() => lucide.createIcons());
+  }
+
+  // ── AUTH VIEWS ─────────────────────────────
+  function renderAuthView(route, container) {
+    let html = '';
+    if (route === '#/login') html = loginView();
+    else if (route === '#/signup') html = signupView();
+    else if (route === '#/forgot') html = forgotView();
+    container.innerHTML = `<div class="auth-layout">${html}</div>`;
+    bindAuthEvents(route);
+  }
+
+  function loginView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Welcome back</h1>
+        <p class="auth-subtitle">Sign in to manage your AI agents</p>
+        <div id="auth-error"></div>
+        <form class="auth-form" id="login-form">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="login-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-input" id="login-password" placeholder="Enter your password" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="login-btn">Sign In</button>
+        </form>
+        <div class="auth-links">
+          <a href="#/forgot">Forgot password?</a><br>
+          Don't have an account? <a href="#/signup">Sign up</a>
+        </div>
+      </div>`;
+  }
+
+  function signupView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Create your account</h1>
+        <p class="auth-subtitle">Start deploying AI agents in minutes</p>
+        <div id="auth-error"></div>
+        <div id="auth-success"></div>
+        <form class="auth-form" id="signup-form">
+          <div class="form-group">
+            <label class="form-label">Display Name</label>
+            <input type="text" class="form-input" id="signup-name" placeholder="Your name">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="signup-email" placeholder="you@example.com" required>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-input" id="signup-password" placeholder="Min. 6 characters" required minlength="6">
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="signup-btn">Create Account</button>
+        </form>
+        <div class="auth-links">
+          Already have an account? <a href="#/login">Sign in</a>
+        </div>
+      </div>`;
+  }
+
+  function forgotView() {
+    return `
+      <div class="auth-card">
+        <div class="auth-logo">
+          <div class="auth-logo-icon">${LOGO_SVG}</div>
+          <div class="auth-logo-text">Croutons Agents</div>
+        </div>
+        <h1 class="auth-title">Reset your password</h1>
+        <p class="auth-subtitle">Enter your email and we'll send a reset link</p>
+        <div id="auth-error"></div>
+        <div id="auth-success"></div>
+        <form class="auth-form" id="forgot-form">
+          <div class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="forgot-email" placeholder="you@example.com" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="forgot-btn">Send Reset Link</button>
+        </form>
+        <div class="auth-links">
+          <a href="#/login">Back to sign in</a>
+        </div>
+      </div>`;
+  }
+
+  function bindAuthEvents(route) {
+    if (route === '#/login') {
+      const form = document.getElementById('login-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('login-btn');
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Signing in...';
+        document.getElementById('auth-error').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          // Session is set via onAuthStateChange
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Sign In';
+        }
+      });
+    } else if (route === '#/signup') {
+      const form = document.getElementById('signup-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('signup-btn');
+        const name = document.getElementById('signup-name').value.trim();
+        const email = document.getElementById('signup-email').value.trim();
+        const password = document.getElementById('signup-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Creating account...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { display_name: name || email.split('@')[0] } }
+          });
+          if (error) throw error;
+          // Check if auto-confirm is off (no session returned)
+          if (!data.session) {
+            document.getElementById('auth-success').innerHTML = `<div class="auth-success">Check your email to confirm your account before signing in.</div>`;
+            btn.textContent = 'Account Created';
+          }
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Create Account';
+        }
+      });
+    } else if (route === '#/forgot') {
+      const form = document.getElementById('forgot-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('forgot-btn');
+        const email = document.getElementById('forgot-email').value.trim();
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+          document.getElementById('auth-success').innerHTML = `<div class="auth-success">If that email exists, we've sent a reset link.</div>`;
+          btn.textContent = 'Sent';
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send Reset Link';
+        }
+      });
     }
   }
 
-  // ── NAV ───────────────────────────────────────────────────────────────────
-  function buildNav(activePage) {
-    const pages = [
-      { hash: '#/', label: 'Dashboard' },
-      { hash: '#/agents', label: 'Agents' },
-      { hash: '#/chat', label: 'Chat' },
-      { hash: '#/command', label: 'Command Center' },
-      { hash: '#/knowledge', label: 'Knowledge' },
-      { hash: '#/ai-search', label: 'AI Search Bible' },
-      { hash: '#/analytics', label: 'Analytics' },
-      { hash: '#/settings', label: 'Settings' },
+  // ── APP SHELL ──────────────────────────────
+  function renderAppShell(route, container) {
+    const navItems = [
+      { icon: 'layout-dashboard', label: 'Dashboard', hash: '#/dashboard' },
+      { icon: 'radar', label: 'Command Center', hash: '#/command-center' },
+      { icon: 'bot', label: 'My Agents', hash: '#/agents' },
+      { icon: 'plus-circle', label: 'Create Agent', hash: '#/wizard' },
+      { icon: 'layers', label: 'Templates', hash: '#/templates' },
+      { icon: 'plug', label: 'Connections', hash: '#/connections' },
+      { icon: 'credit-card', label: 'Billing', hash: '#/billing' },
+      { icon: 'settings', label: 'Settings', hash: '#/settings' },
     ];
-    const nav = el('nav', { class: 'sidebar' });
-    const logo = el('div', { class: 'sidebar-logo' }, 'Croutons');
-    nav.appendChild(logo);
-    const ul = el('ul', { class: 'sidebar-nav' });
-    for (const p of pages) {
-      const li = el('li', {});
-      const a = el('a', {
-        href: p.hash,
-        class: p.hash === activePage ? 'active' : '',
-      }, p.label);
-      li.appendChild(a);
-      ul.appendChild(li);
-    }
-    nav.appendChild(ul);
-    return nav;
+
+    const activeHash = route.startsWith('#/agent/') ? '#/agents' : route.split('?')[0];
+    const userName = cachedProfile?.display_name || currentSession?.user?.user_metadata?.display_name || 'User';
+    const userEmail = cachedProfile?.email || currentSession?.user?.email || '';
+    const userInitial = (userName[0] || 'U').toUpperCase();
+
+    // Determine page title
+    let pageTitle = 'Dashboard';
+    if (route === '#/command-center') pageTitle = 'Command Center';
+    else if (route === '#/agents') pageTitle = 'My Agents';
+    else if (route === '#/wizard') pageTitle = 'Create Agent';
+    else if (route === '#/templates') pageTitle = 'Templates';
+    else if (route === '#/connections') pageTitle = 'Connections';
+    else if (route === '#/billing') pageTitle = 'Billing';
+    else if (route === '#/settings') pageTitle = 'Settings';
+    else if (route.startsWith('#/agent/')) pageTitle = 'Agent Detail';
+
+    container.innerHTML = `
+      <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-brand-icon">${LOGO_SVG}</div>
+            <div class="sidebar-brand-name">Croutons Agents</div>
+          </div>
+          <nav class="sidebar-nav">
+            <div class="sidebar-section-label">Navigation</div>
+            ${navItems.map(item => `
+              <a href="${item.hash}" class="${activeHash === item.hash ? 'active' : ''}">
+                <i data-lucide="${item.icon}"></i>
+                <span>${item.label}</span>
+              </a>
+            `).join('')}
+          </nav>
+          <div class="sidebar-footer">
+            <div class="sidebar-user">
+              <div class="sidebar-user-avatar">${userInitial}</div>
+              <div class="sidebar-user-info">
+                <div class="sidebar-user-name">${escapeHtml(userName)}</div>
+                <div class="sidebar-user-email">${escapeHtml(userEmail)}</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <header class="header">
+          <div class="header-left">
+            <button class="hamburger" id="hamburger-btn" onclick="window.NC.toggleSidebar()">
+              <i data-lucide="menu"></i>
+            </button>
+            <span class="header-title">${escapeHtml(pageTitle)}</span>
+          </div>
+          <div class="header-right">
+            <button class="btn btn-ghost btn-sm" id="logout-btn">
+              <i data-lucide="log-out"></i>
+              Sign Out
+            </button>
+          </div>
+        </header>
+
+        <main class="main-content app-bg" id="main-content">
+          <div class="loading-center"><div class="loading-spinner"></div></div>
+        </main>
+      </div>`;
+
+    // Bind logout
+    document.getElementById('logout-btn')?.addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      currentSession = null;
+      cachedProfile = null;
+      navigate('#/login');
+    });
+
+    // Fetch profile if needed, then render page content
+    ensureProfile().then(() => {
+      renderPageContent(route);
+    });
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: DASHBOARD
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
+  async function ensureProfile() {
+    if (cachedProfile) return;
+    try {
+      cachedProfile = await apiFetch('/api/profile');
+    } catch (err) {
+      // Profile might not exist yet for new users, that's ok
+      cachedProfile = {
+        email: currentSession?.user?.email || '',
+        display_name: currentSession?.user?.user_metadata?.display_name || '',
+        plan: 'free',
+        api_calls_this_month: 0,
+        api_calls_limit: 100,
+      };
+    }
+  }
 
-      const header = el('div', { class: 'page-header' });
-      header.appendChild(el('h1', {}, 'Dashboard'));
-      main.appendChild(header);
+  // ── PAGE CONTENT ROUTER ────────────────────
+  function renderPageContent(route) {
+    const main = document.getElementById('main-content');
+    if (!main) return;
 
-      const grid = el('div', { class: 'dashboard-grid' });
-      main.appendChild(grid);
+    if (route === '#/dashboard') renderDashboard(main);
+    else if (route === '#/command-center') renderCommandCenter(main);
+    else if (route === '#/agents') renderAgents(main);
+    else if (route === '#/wizard') renderWizard(main);
+    else if (route === '#/templates') renderTemplates(main);
+    else if (route === '#/connections') renderConnections(main);
+    else if (route === '#/billing') renderBilling(main);
+    else if (route === '#/settings') renderSettings(main);
+    else if (route.startsWith('#/agent/')) {
+      const params = getRouteParams('#/agent/:id', route);
+      if (params) renderAgentDetail(main, params.id);
+      else renderDashboard(main);
+    }
+    else renderDashboard(main);
+  }
 
-      // Load stats
-      Promise.all([
-        api('/api/agents').catch(() => []),
-        api('/api/knowledge/stats').catch(() => ({ total: 0 })),
-        api('/api/analytics/summary').catch(() => ({})),
-      ]).then(([agents, kStats, analytics]) => {
-        const cards = [
-          { label: 'Active Agents', value: Array.isArray(agents) ? agents.filter(a => a.active).length : 0, icon: '🤖' },
-          { label: 'Total Agents', value: Array.isArray(agents) ? agents.length : 0, icon: '📋' },
-          { label: 'Knowledge Entries', value: kStats.total || 0, icon: '📚' },
-          { label: 'Messages Today', value: analytics.messages_today || 0, icon: '💬' },
-          { label: 'Tokens Used', value: formatNum(analytics.tokens_today || 0), icon: '🔢' },
-          { label: 'Est. Cost Today', value: '$' + ((analytics.cost_today || 0).toFixed(4)), icon: '💰' },
-        ];
-        for (const c of cards) {
-          const card = el('div', { class: 'stat-card' });
-          card.appendChild(el('div', { class: 'stat-icon' }, c.icon));
-          card.appendChild(el('div', { class: 'stat-value' }, String(c.value)));
-          card.appendChild(el('div', { class: 'stat-label' }, c.label));
-          grid.appendChild(card);
-        }
+  // ── DASHBOARD VIEW ─────────────────────────
+  async function renderDashboard(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/dashboard');
+      const plan = data.current_plan || 'free';
+      const callsPct = data.api_calls_limit > 0 ? Math.min((data.api_calls_this_month / data.api_calls_limit) * 100, 100) : 0;
+      const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
 
-        // Recent agents
-        if (Array.isArray(agents) && agents.length > 0) {
-          const section = el('div', { class: 'dashboard-section' });
-          main.appendChild(section);
-          section.appendChild(el('h2', {}, 'Recent Agents'));
-          const list = el('div', { class: 'agent-list-preview' });
-          section.appendChild(list);
-          for (const agent of agents.slice(0, 5)) {
-            const row = el('div', { class: 'agent-row-preview' });
-            row.appendChild(el('span', { class: 'agent-name' }, agent.name || 'Unnamed'));
-            row.appendChild(el('span', { class: `badge ${agent.active ? 'badge-green' : 'badge-gray'}` }, agent.active ? 'Active' : 'Inactive'));
-            const chatBtn = el('button', { class: 'btn btn-sm', onclick: () => navigate(`#/chat?agent=${agent.id}`) }, 'Chat');
-            row.appendChild(chatBtn);
-            list.appendChild(row);
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Overview of your AI agents and usage</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Agents</div>
+            <div class="kpi-value">${data.total_agents}</div>
+            <div class="kpi-meta">${data.active_agents} active</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Active Runs</div>
+            <div class="kpi-value">${data.active_runs}</div>
+            <div class="kpi-meta">Currently running</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">API Calls</div>
+            <div class="kpi-value">${data.api_calls_this_month}<span style="font-size:14px;color:var(--color-text-muted)">/${data.api_calls_limit}</span></div>
+            <div style="margin-top:8px">
+              <div class="progress-bar"><div class="progress-bar-fill ${pctClass}" style="width:${callsPct}%"></div></div>
+            </div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Current Plan</div>
+            <div class="kpi-value" style="font-size:22px;text-transform:capitalize">${plan}</div>
+            <div class="kpi-meta"><span class="badge badge-${plan}">${plan}</span></div>
+          </div>
+        </div>
+
+        ${data.total_agents === 0 ? `
+          <div class="card" style="text-align:center;padding:48px 24px;margin-bottom:24px">
+            <div class="empty-state-icon" style="margin:0 auto 16px"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
+            <h3 class="empty-state-title">Create Your First Agent</h3>
+            <p class="empty-state-desc">Deploy an AI agent to automate your workflow. Choose from templates or build from scratch.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Get Started</a>
+          </div>
+        ` : ''}
+
+        <div class="card">
+          <div class="card-header">
+            <h3 class="card-title">Recent Activity</h3>
+          </div>
+          ${data.recent_runs.length === 0
+            ? `<p class="text-sm text-muted" style="padding:16px 0">No recent activity yet. Run an agent to see results here.</p>`
+            : `<table class="runs-table">
+                <thead>
+                  <tr>
+                    <th>Agent</th>
+                    <th>Status</th>
+                    <th>Tokens</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${data.recent_runs.map(run => `
+                    <tr>
+                      <td><strong>${escapeHtml(run.agent_id?.substring(0, 8) || '—')}</strong></td>
+                      <td><span class="badge badge-${run.status}">${run.status}</span></td>
+                      <td>${run.total_tokens || '—'}</td>
+                      <td>${timeAgo(run.started_at)}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
           }
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load dashboard</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="window.NC.render()">Retry</button></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── COMMAND CENTER ────────────────────────
+  let ccActiveTab = 'overview';
+  let ccCharts = {};
+
+  async function renderCommandCenter(container) {
+    const tabs = [
+      { id: 'overview', label: 'Overview', icon: 'gauge' },
+      { id: 'seo', label: 'SEO Metrics', icon: 'search' },
+      { id: 'ai-visibility', label: 'AI Visibility', icon: 'eye' },
+      { id: 'llm-conversions', label: 'LLM Conversions', icon: 'trending-up' },
+      { id: 'competitors', label: 'Competitors', icon: 'swords' },
+      { id: 'agent-ops', label: 'Agent Ops', icon: 'activity' },
+    ];
+
+    container.innerHTML = `
+      <div class="page-header">
+        <div style="display:flex;align-items:center;gap:12px">
+          <div style="width:36px;height:36px;border-radius:10px;background:linear-gradient(135deg,#00c8ff 0%,#7c3aed 100%);display:flex;align-items:center;justify-content:center">
+            <i data-lucide="radar" style="width:20px;height:20px;color:#fff"></i>
+          </div>
+          <div>
+            <h1 class="page-title" style="margin:0">Command Center</h1>
+            <p class="page-subtitle" style="margin:0">SEO, AEO, GEO &amp; Agent Intelligence</p>
+          </div>
+        </div>
+      </div>
+      <div class="cc-tabs">
+        ${tabs.map(t => `
+          <button class="cc-tab ${ccActiveTab === t.id ? 'cc-tab-active' : ''}" data-tab="${t.id}">
+            <i data-lucide="${t.icon}" style="width:14px;height:14px"></i>
+            <span>${t.label}</span>
+          </button>
+        `).join('')}
+      </div>
+      <div id="cc-content" class="cc-content"></div>
+    `;
+
+    // Bind tab clicks
+    container.querySelectorAll('.cc-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        ccActiveTab = btn.dataset.tab;
+        // Destroy existing charts
+        Object.values(ccCharts).forEach(c => { try { c.destroy(); } catch(e){} });
+        ccCharts = {};
+        renderCommandCenter(container);
+      });
+    });
+
+    lucide.createIcons();
+    const ccEl = document.getElementById('cc-content');
+    if (!ccEl) return;
+
+    if (ccActiveTab === 'overview') await renderCCOverview(ccEl);
+    else if (ccActiveTab === 'seo') await renderCCSEO(ccEl);
+    else if (ccActiveTab === 'ai-visibility') renderCCAIVisibility(ccEl);
+    else if (ccActiveTab === 'llm-conversions') renderCCLLMConversions(ccEl);
+    else if (ccActiveTab === 'competitors') renderCCCompetitors(ccEl);
+    else if (ccActiveTab === 'agent-ops') await renderCCAgentOps(ccEl);
+  }
+
+  // ── CC: OVERVIEW TAB ──
+  async function renderCCOverview(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/overview');
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="plug" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.service_count}</div>
+              <div class="cc-kpi-label">Connected Services</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="bot" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.agents.total}</div>
+              <div class="cc-kpi-label">Agents <span class="badge badge-active">${data.agents.active} active</span></div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${(data.agents.total_tokens || 0).toLocaleString()}</div>
+              <div class="cc-kpi-label">Total Tokens</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">$${(data.cost_total_usd || 0).toFixed(4)}</div>
+              <div class="cc-kpi-label">Total Cost (recent)</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Connected Services</h3></div>
+            <div class="cc-services-list">
+              ${data.connected_services.length === 0
+                ? '<p class="text-sm text-muted" style="padding:12px 0">No services connected. Go to <a href="#/connections">Connections</a> to set up.</p>'
+                : data.connected_services.map(s => `
+                    <div class="cc-service-item">
+                      <span class="cc-service-dot cc-service-dot-active"></span>
+                      <span>${escapeHtml(s.replace(/_/g, ' '))}</span>
+                    </div>
+                  `).join('')
+              }
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Recent Activity</h3></div>
+            ${data.recent_runs.length === 0
+              ? '<p class="text-sm text-muted" style="padding:12px 0">No recent runs yet.</p>'
+              : `<div class="cc-activity-list">
+                  ${data.recent_runs.slice(0, 8).map(r => `
+                    <div class="cc-activity-item">
+                      <span class="badge badge-${r.status}" style="font-size:10px">${r.status}</span>
+                      <span class="cc-activity-text">${escapeHtml(r.input_preview || '—')}</span>
+                      <span class="cc-activity-meta">${r.total_tokens || 0} tok · ${timeAgo(r.started_at)}</span>
+                    </div>
+                  `).join('')}
+                </div>`
+            }
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Quick Navigation</h3></div>
+          <div class="cc-quick-nav">
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=seo]').click()"><i data-lucide="search" style="width:16px;height:16px"></i>SEO Metrics</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=ai-visibility]').click()"><i data-lucide="eye" style="width:16px;height:16px"></i>AI Visibility</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=llm-conversions]').click()"><i data-lucide="trending-up" style="width:16px;height:16px"></i>LLM Conversions</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=competitors]').click()"><i data-lucide="swords" style="width:16px;height:16px"></i>Competitors</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=agent-ops]').click()"><i data-lucide="activity" style="width:16px;height:16px"></i>Agent Ops</button>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CC: SEO TAB ──
+  async function renderCCSEO(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/seo');
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="trending-up" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.domain_authority}</div>
+              <div class="cc-kpi-label">Domain Authority</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="globe" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.organic_traffic.toLocaleString()}</div>
+              <div class="cc-kpi-label">Organic Traffic</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="key" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.keywords_ranking}</div>
+              <div class="cc-kpi-label">Keywords Ranking</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="link" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.backlinks.toLocaleString()}</div>
+              <div class="cc-kpi-label">Backlinks</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Top Organic Keywords</h3></div>
+            <table class="runs-table">
+              <thead><tr><th>Keyword</th><th>Position</th><th>Volume</th><th>Difficulty</th></tr></thead>
+              <tbody>
+                ${data.top_keywords.map(k => `
+                  <tr>
+                    <td>${escapeHtml(k.keyword)}</td>
+                    <td><strong>#${k.position}</strong></td>
+                    <td>${k.volume.toLocaleString()}</td>
+                    <td>${k.difficulty}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Core Web Vitals</h3></div>
+            <div style="padding:8px 0">
+              ${Object.entries(data.core_web_vitals).map(([k, v]) => `
+                <div style="display:flex;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--color-border)">
+                  <span class="text-sm">${k}</span>
+                  <span class="text-sm" style="font-weight:600;color:${v.startsWith('Good') ? '#10b981' : '#f59e0b'}">${v}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CC: AI VISIBILITY TAB ──
+  function renderCCAIVisibility(el) {
+    const mockData = {
+      overallScore: 72,
+      trend: '+8% this month',
+      llmPresence: [
+        { llm: 'ChatGPT', mentions: 142, sentiment: 0.78, rank: 1 },
+        { llm: 'Claude', mentions: 89, sentiment: 0.82, rank: 2 },
+        { llm: 'Gemini', mentions: 61, sentiment: 0.71, rank: 3 },
+        { llm: 'Perplexity', mentions: 34, sentiment: 0.75, rank: 4 },
+      ],
+      topQueries: [
+        'best AI agent platforms',
+        'automate business workflows AI',
+        'no-code AI automation tools',
+        'AI agent scheduling software',
+      ],
+      citations: { total: 326, thisWeek: 47, growth: '+14%' },
+    };
+
+    el.innerHTML = `
+      <div class="cc-kpi-grid">
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.12);color:#00c8ff"><i data-lucide="eye" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.overallScore}<span style="font-size:14px">/100</span></div>
+            <div class="cc-kpi-label">AI Visibility Score <span style="color:#10b981">${mockData.trend}</span></div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.12);color:#7c3aed"><i data-lucide="quote" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.citations.total}</div>
+            <div class="cc-kpi-label">Total Citations <span style="color:#10b981">${mockData.citations.growth}</span></div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.12);color:#10b981"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.citations.thisWeek}</div>
+            <div class="cc-kpi-label">Citations This Week</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.12);color:#f59e0b"><i data-lucide="message-square" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.llmPresence.reduce((s,l) => s+l.mentions, 0)}</div>
+            <div class="cc-kpi-label">Total LLM Mentions</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">LLM Presence Breakdown</h3></div>
+          <table class="runs-table">
+            <thead><tr><th>LLM</th><th>Mentions</th><th>Sentiment</th><th>Rank</th></tr></thead>
+            <tbody>
+              ${mockData.llmPresence.map(l => `
+                <tr>
+                  <td><strong>${l.llm}</strong></td>
+                  <td>${l.mentions}</td>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:6px">
+                      <div style="flex:1;background:var(--color-border);border-radius:4px;height:6px">
+                        <div style="width:${Math.round(l.sentiment*100)}%;height:6px;border-radius:4px;background:#10b981"></div>
+                      </div>
+                      <span>${Math.round(l.sentiment*100)}%</span>
+                    </div>
+                  </td>
+                  <td>#${l.rank}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Top AI Queries You Appear In</h3></div>
+          <div style="padding:8px 0">
+            ${mockData.topQueries.map((q, i) => `
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid var(--color-border)">
+                <span style="width:24px;height:24px;border-radius:50%;background:rgba(0,200,255,0.1);color:#00c8ff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${i+1}</span>
+                <span class="text-sm">${escapeHtml(q)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: LLM CONVERSIONS TAB ──
+  function renderCCLLMConversions(el) {
+    const mockData = {
+      totalConversions: 847,
+      conversionRate: 3.4,
+      avgOrderValue: 127,
+      totalRevenue: 107569,
+      topSources: [
+        { source: 'ChatGPT', visits: 1240, conversions: 89, revenue: 11303, rate: 7.2 },
+        { source: 'Claude', visits: 876, conversions: 54, revenue: 6858, rate: 6.2 },
+        { source: 'Perplexity', visits: 654, conversions: 38, revenue: 4826, rate: 5.8 },
+        { source: 'Gemini', visits: 432, conversions: 19, revenue: 2413, rate: 4.4 },
+      ],
+      recentConversions: [
+        { source: 'ChatGPT', action: 'signup', value: 99, time: '2m ago' },
+        { source: 'Claude', action: 'upgrade', value: 299, time: '8m ago' },
+        { source: 'Perplexity', action: 'signup', value: 99, time: '15m ago' },
+        { source: 'ChatGPT', action: 'signup', value: 99, time: '23m ago' },
+      ],
+    };
+
+    el.innerHTML = `
+      <div class="cc-kpi-grid">
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.12);color:#10b981"><i data-lucide="trending-up" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.totalConversions}</div>
+            <div class="cc-kpi-label">Total LLM Conversions</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.12);color:#00c8ff"><i data-lucide="percent" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">${mockData.conversionRate}%</div>
+            <div class="cc-kpi-label">Avg Conversion Rate</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.12);color:#7c3aed"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">$${mockData.avgOrderValue}</div>
+            <div class="cc-kpi-label">Avg Order Value</div>
+          </div>
+        </div>
+        <div class="cc-kpi">
+          <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.12);color:#f59e0b"><i data-lucide="bar-chart" style="width:18px;height:18px"></i></div>
+          <div class="cc-kpi-body">
+            <div class="cc-kpi-value">$${(mockData.totalRevenue/1000).toFixed(1)}k</div>
+            <div class="cc-kpi-label">Revenue from LLM Traffic</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-grid-2">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Conversions by LLM Source</h3></div>
+          <table class="runs-table">
+            <thead><tr><th>Source</th><th>Visits</th><th>Conv.</th><th>Rate</th><th>Revenue</th></tr></thead>
+            <tbody>
+              ${mockData.topSources.map(s => `
+                <tr>
+                  <td><strong>${s.source}</strong></td>
+                  <td>${s.visits.toLocaleString()}</td>
+                  <td>${s.conversions}</td>
+                  <td><span style="color:#10b981;font-weight:600">${s.rate}%</span></td>
+                  <td>$${s.revenue.toLocaleString()}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Recent Conversions</h3></div>
+          <div class="cc-activity-list">
+            ${mockData.recentConversions.map(c => `
+              <div class="cc-activity-item">
+                <span class="badge badge-success" style="font-size:10px">${c.action}</span>
+                <span class="cc-activity-text">via ${c.source}</span>
+                <span class="cc-activity-meta">$${c.value} · ${c.time}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: COMPETITORS TAB ──
+  function renderCCCompetitors(el) {
+    const mockData = [
+      { name: 'Zapier', da: 91, traffic: 4200000, keywords: 180000, aiScore: 88, trend: '+2%' },
+      { name: 'Make.com', da: 78, traffic: 890000, keywords: 52000, aiScore: 71, trend: '+5%' },
+      { name: 'n8n.io', da: 65, traffic: 340000, keywords: 28000, aiScore: 63, trend: '+12%' },
+      { name: 'Activepieces', da: 48, traffic: 120000, keywords: 11000, aiScore: 55, trend: '+19%' },
+      { name: 'YOU', da: 32, traffic: 45000, keywords: 4800, aiScore: 72, trend: '+31%' },
+    ];
+
+    el.innerHTML = `
+      <div class="card" style="margin-bottom:16px">
+        <div class="card-header"><h3 class="card-title">Competitive Landscape</h3></div>
+        <table class="runs-table">
+          <thead>
+            <tr>
+              <th>Competitor</th>
+              <th>Domain Authority</th>
+              <th>Est. Traffic</th>
+              <th>Keywords</th>
+              <th>AI Score</th>
+              <th>Growth</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${mockData.map(c => `
+              <tr style="${c.name === 'YOU' ? 'background:rgba(0,200,255,0.05);font-weight:600' : ''}">
+                <td>${c.name === 'YOU' ? `<span style="color:#00c8ff">⭐ ${c.name}</span>` : c.name}</td>
+                <td>${c.da}</td>
+                <td>${c.traffic.toLocaleString()}</td>
+                <td>${c.keywords.toLocaleString()}</td>
+                <td>
+                  <div style="display:flex;align-items:center;gap:6px">
+                    <div style="flex:1;background:var(--color-border);border-radius:4px;height:6px">
+                      <div style="width:${c.aiScore}%;height:6px;border-radius:4px;background:${c.name === 'YOU' ? '#00c8ff' : '#7c3aed'}"></div>
+                    </div>
+                    <span>${c.aiScore}</span>
+                  </div>
+                </td>
+                <td style="color:#10b981">${c.trend}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">Your Competitive Advantages</h3></div>
+        <div style="padding:8px 0">
+          <div style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+            <div style="font-weight:600;margin-bottom:4px;color:#10b981">Highest Growth Rate (+31%)</div>
+            <div class="text-sm text-muted">You're growing faster than all tracked competitors.</div>
+          </div>
+          <div style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+            <div style="font-weight:600;margin-bottom:4px;color:#00c8ff">Superior AI Visibility (72/100)</div>
+            <div class="text-sm text-muted">Your AI Score exceeds n8n, Activepieces, and Make.com.</div>
+          </div>
+          <div style="padding:12px 0">
+            <div style="font-weight:600;margin-bottom:4px;color:#7c3aed">Niche Keyword Opportunities</div>
+            <div class="text-sm text-muted">4,800 targeted keywords with less competition than Zapier.</div>
+          </div>
+        </div>
+      </div>
+    `;
+    lucide.createIcons();
+  }
+
+  // ── CC: AGENT OPS TAB ──
+  async function renderCCAgentOps(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/command-center/agent-ops');
+
+      el.innerHTML = `
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="check-circle" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.success_rate}%</div>
+              <div class="cc-kpi-label">Success Rate</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${(data.total_tokens || 0).toLocaleString()}</div>
+              <div class="cc-kpi-label">Total Tokens Used</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="activity" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">${data.total_runs}</div>
+              <div class="cc-kpi-label">Total Runs</div>
+            </div>
+          </div>
+          <div class="cc-kpi">
+            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-body">
+              <div class="cc-kpi-value">$${(data.total_cost_usd || 0).toFixed(4)}</div>
+              <div class="cc-kpi-label">Total Cost</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Agent Performance</h3></div>
+            <table class="runs-table">
+              <thead><tr><th>Agent</th><th>Runs</th><th>Success</th><th>Tokens</th></tr></thead>
+              <tbody>
+                ${data.top_agents.map(a => `
+                  <tr>
+                    <td><strong>${escapeHtml(a.name)}</strong></td>
+                    <td>${a.runs}</td>
+                    <td><span class="badge badge-${a.success_rate > 90 ? 'success' : 'warning'}">${a.success_rate}%</span></td>
+                    <td>${(a.tokens || 0).toLocaleString()}</td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Status Breakdown</h3></div>
+            <div style="padding:8px 0">
+              ${Object.entries(data.status_breakdown).map(([status, count]) => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--color-border)">
+                  <span class="badge badge-${status}">${status}</span>
+                  <span class="text-sm" style="font-weight:600">${count}</span>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        </div>
+      `;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── AGENTS VIEW ────────────────────────────
+  async function renderAgents(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const agents = await apiFetch('/api/agents');
+
+      let html = `
+        <div class="page-header">
+          <div>
+            <h1 class="page-title">My Agents</h1>
+            <p class="page-subtitle">${agents.length} agent${agents.length !== 1 ? 's' : ''} configured</p>
+          </div>
+          <a href="#/wizard" class="btn btn-primary"><i data-lucide="plus"></i> New Agent</a>
+        </div>`;
+
+      if (agents.length === 0) {
+        html += `
+          <div class="empty-state">
+            <div class="empty-state-icon"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
+            <h3 class="empty-state-title">No agents yet</h3>
+            <p class="empty-state-desc">Create your first AI agent to start automating workflows.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Create Agent</a>
+          </div>`;
+      } else {
+        html += '<div class="agents-grid">';
+        for (const agent of agents) {
+          html += agentCard(agent);
+        }
+        html += '</div>';
+      }
+
+      container.innerHTML = html;
+      lucide.createIcons();
+      bindAgentCardEvents(container);
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load agents</h3><p>${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="window.NC.render()">Retry</button></div>`;
+    }
+  }
+
+  function agentCard(agent) {
+    const status = agent.status || 'idle';
+    const model = agent.model || 'gpt-4o-mini';
+    const schedule = agent.schedule || '—';
+    return `
+      <div class="agent-card" data-agent-id="${agent.id}">
+        <div class="agent-card-header">
+          <div>
+            <div class="agent-card-name">${escapeHtml(agent.name)}</div>
+            <span class="badge badge-${status}">${status}</span>
+          </div>
+          <div class="agent-card-actions">
+            <button class="btn btn-ghost btn-sm" data-action="run" data-id="${agent.id}">
+              <i data-lucide="play"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="view" data-id="${agent.id}">
+              <i data-lucide="eye"></i>
+            </button>
+            <button class="btn btn-ghost btn-sm" data-action="delete" data-id="${agent.id}">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </div>
+        <p class="agent-card-desc">${escapeHtml(agent.description || '—')}</p>
+        <div class="agent-card-meta">
+          <span><i data-lucide="cpu" style="width:12px;height:12px"></i> ${escapeHtml(model)}</span>
+          <span><i data-lucide="clock" style="width:12px;height:12px"></i> ${escapeHtml(schedule)}</span>
+        </div>
+      </div>`;
+  }
+
+  function bindAgentCardEvents(container) {
+    container.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const id = btn.dataset.id;
+        if (action === 'run') {
+          btn.disabled = true;
+          try {
+            await apiFetch(`/api/agents/${id}/run`, { method: 'POST' });
+            toast('Agent run started', 'success');
+          } catch (err) { toast(err.message, 'error'); }
+          finally { btn.disabled = false; }
+        } else if (action === 'view') {
+          navigate(`#/agent/${id}`);
+        } else if (action === 'delete') {
+          if (!confirm('Delete this agent?')) return;
+          try {
+            await apiFetch(`/api/agents/${id}`, { method: 'DELETE' });
+            toast('Agent deleted', 'success');
+            renderAgents(container);
+          } catch (err) { toast(err.message, 'error'); }
         }
       });
     });
-  });
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: AGENTS
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/agents', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/agents'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      const header = el('div', { class: 'page-header' });
-      header.appendChild(el('h1', {}, 'Agents'));
-      const newBtn = el('button', { class: 'btn btn-primary', onclick: () => navigate('#/wizard') }, '+ New Agent');
-      header.appendChild(newBtn);
-      main.appendChild(header);
-
-      const tbody = el('tbody', {});
-      const table = el('table', { class: 'data-table' });
-      const thead = el('thead', {});
-      thead.appendChild(el('tr', {},
-        el('th', {}, 'Name'),
-        el('th', {}, 'Model'),
-        el('th', {}, 'Status'),
-        el('th', {}, 'Schedule'),
-        el('th', {}, 'Actions'),
-      ));
-      table.appendChild(thead);
-      table.appendChild(tbody);
-      main.appendChild(table);
-
-      const loading = el('div', { class: 'loading-spinner' }, 'Loading agents…');
-      main.appendChild(loading);
-
-      api('/api/agents').then(agents => {
-        loading.remove();
-        if (!agents.length) {
-          tbody.appendChild(el('tr', {}, el('td', { colspan: '5', class: 'empty-cell' }, 'No agents yet. Create one!')));
-          return;
+    container.querySelectorAll('.agent-card').forEach(card => {
+      card.addEventListener('click', (e) => {
+        if (!e.target.closest('[data-action]')) {
+          navigate(`#/agent/${card.dataset.agentId}`);
         }
-        for (const agent of agents) {
-          const row = el('tr', {});
-          row.appendChild(el('td', {}, agent.name || 'Unnamed'));
-          row.appendChild(el('td', {}, agent.model || '-'));
-          row.appendChild(el('td', {}, el('span', { class: `badge ${agent.active ? 'badge-green' : 'badge-gray'}` }, agent.active ? 'Active' : 'Inactive')));
-          row.appendChild(el('td', {}, agent.schedule || 'manual'));
-          const actions = el('td', { class: 'action-cell' });
-          actions.appendChild(el('button', { class: 'btn btn-sm', onclick: () => navigate(`#/chat?agent=${agent.id}`) }, 'Chat'));
-          actions.appendChild(el('button', { class: 'btn btn-sm btn-warning', onclick: () => navigate(`#/wizard?edit=${agent.id}`) }, 'Edit'));
-          actions.appendChild(el('button', { class: 'btn btn-sm btn-danger', onclick: () => deleteAgent(agent.id, row) }, 'Delete'));
-          row.appendChild(actions);
-          tbody.appendChild(row);
-        }
-      }).catch(e => { loading.textContent = 'Error: ' + e.message; });
+      });
     });
-  });
+  }
 
-  async function deleteAgent(id, row) {
-    if (!confirm('Delete this agent?')) return;
+  // ── AGENT DETAIL VIEW ──────────────────────
+  async function renderAgentDetail(container, agentId) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      await api(`/api/agents/${id}`, { method: 'DELETE' });
-      row.remove();
-      toast('Agent deleted', 'success');
-    } catch (e) {
-      toast('Delete failed: ' + e.message, 'error');
+      const agent = await apiFetch(`/api/agents/${agentId}`);
+      const runs = await apiFetch(`/api/agents/${agentId}/runs?limit=20`);
+
+      container.innerHTML = `
+        <div class="page-header">
+          <div>
+            <button class="btn btn-ghost btn-sm" onclick="navigate('#/agents')" style="margin-bottom:8px">
+              <i data-lucide="arrow-left"></i> Back
+            </button>
+            <h1 class="page-title">${escapeHtml(agent.name)}</h1>
+            <p class="page-subtitle">${escapeHtml(agent.description || '—')}</p>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary" id="run-agent-btn">
+              <i data-lucide="play"></i> Run Now
+            </button>
+            <button class="btn btn-danger" id="delete-agent-btn">
+              <i data-lucide="trash-2"></i>
+            </button>
+          </div>
+        </div>
+
+        <div class="agent-detail-grid">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Configuration</h3></div>
+            <div class="agent-detail-config">
+              <div class="config-row"><span class="config-label">Status</span><span class="badge badge-${agent.status}">${agent.status}</span></div>
+              <div class="config-row"><span class="config-label">Model</span><span>${escapeHtml(agent.model || 'gpt-4o-mini')}</span></div>
+              <div class="config-row"><span class="config-label">Schedule</span><span>${escapeHtml(agent.schedule || 'Manual')}</span></div>
+              <div class="config-row"><span class="config-label">Temperature</span><span>${agent.temperature ?? 0.7}</span></div>
+              <div class="config-row"><span class="config-label">Max Tokens</span><span>${agent.max_tokens ?? 1024}</span></div>
+              <div class="config-row"><span class="config-label">Created</span><span>${formatDate(agent.created_at)}</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Goals</h3></div>
+            ${!agent.goals?.length
+              ? '<p class="text-sm text-muted">No goals defined.</p>'
+              : `<ul class="goals-list">${agent.goals.map(g => `<li>${escapeHtml(g)}</li>`).join('')}</ul>`
+            }
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header">
+            <h3 class="card-title">Run History</h3>
+            <span class="badge">${runs.length} runs</span>
+          </div>
+          ${runs.length === 0
+            ? '<p class="text-sm text-muted" style="padding:16px 0">No runs yet.</p>'
+            : `<table class="runs-table">
+                <thead><tr><th>Status</th><th>Input</th><th>Tokens</th><th>Cost</th><th>Started</th><th>Duration</th></tr></thead>
+                <tbody>
+                  ${runs.map(r => `
+                    <tr>
+                      <td><span class="badge badge-${r.status}">${r.status}</span></td>
+                      <td class="text-sm">${escapeHtml((r.input_preview || r.input || '—').substring(0, 60))}</td>
+                      <td>${r.total_tokens || '—'}</td>
+                      <td>${r.cost_usd ? '$' + r.cost_usd.toFixed(4) : '—'}</td>
+                      <td>${timeAgo(r.started_at)}</td>
+                      <td>${r.duration_ms ? Math.round(r.duration_ms / 1000) + 's' : '—'}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+          }
+        </div>
+      `;
+
+      document.getElementById('run-agent-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('run-agent-btn');
+        btn.disabled = true;
+        btn.innerHTML = '<i data-lucide="loader"></i> Running...';
+        lucide.createIcons();
+        try {
+          await apiFetch(`/api/agents/${agentId}/run`, { method: 'POST' });
+          toast('Agent run started', 'success');
+          setTimeout(() => renderAgentDetail(container, agentId), 2000);
+        } catch (err) { toast(err.message, 'error'); btn.disabled = false; }
+      });
+
+      document.getElementById('delete-agent-btn')?.addEventListener('click', async () => {
+        if (!confirm('Delete this agent and all its runs?')) return;
+        try {
+          await apiFetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+          toast('Agent deleted', 'success');
+          navigate('#/agents');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load agent</h3><p>${escapeHtml(err.message)}</p><button class="btn btn-primary" onclick="navigate('#/agents')">Back to Agents</button></div>`;
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: CHAT
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/chat', function () {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
-    const agentId = params.get('agent');
+  // ── WIZARD ─────────────────────────────────
+  async function renderWizard(container) {
+    wizardStep = 0;
+    wizardData = {
+      template_id: null, templateObj: null, name: '', description: '',
+      goals: [], connections: [], model: 'gpt-4o-mini',
+      temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [],
+    };
+    await renderWizardStep(container);
+  }
 
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/chat'));
-      const main = el('main', { class: 'main-content chat-layout' });
-      wrapper.appendChild(main);
+  async function renderWizardStep(container) {
+    const steps = ['Template', 'Name & Goals', 'Connections', 'Configure', 'Review'];
+    const stepHtml = steps.map((s, i) => `
+      <div class="wizard-step ${i < wizardStep ? 'done' : i === wizardStep ? 'active' : ''}">
+        <div class="wizard-step-dot">${i < wizardStep ? '<i data-lucide="check" style="width:10px;height:10px"></i>' : i + 1}</div>
+        <div class="wizard-step-label">${s}</div>
+      </div>
+    `).join('<div class="wizard-connector"></div>');
 
-      const header = el('div', { class: 'page-header' });
-      const titleEl = el('h1', {}, 'Chat');
-      header.appendChild(titleEl);
-      main.appendChild(header);
+    let body = '';
+    if (wizardStep === 0) body = await wizardStep0();
+    else if (wizardStep === 1) body = wizardStep1();
+    else if (wizardStep === 2) body = await wizardStep2();
+    else if (wizardStep === 3) body = wizardStep3();
+    else if (wizardStep === 4) body = wizardStep4();
 
-      // Agent selector
-      const selectorRow = el('div', { class: 'chat-selector-row' });
-      const agentSelect = el('select', { class: 'form-select' });
-      agentSelect.appendChild(el('option', { value: '' }, '— Select Agent —'));
-      selectorRow.appendChild(el('label', {}, 'Agent: '));
-      selectorRow.appendChild(agentSelect);
-      main.appendChild(selectorRow);
+    container.innerHTML = `
+      <div class="page-header">
+        <h1 class="page-title">Create Agent</h1>
+        <p class="page-subtitle">Follow the steps to configure your AI agent</p>
+      </div>
+      <div class="wizard-container">
+        <div class="wizard-progress">${stepHtml}</div>
+        <div class="wizard-body" id="wizard-body">${body}</div>
+        <div class="wizard-footer" id="wizard-footer">
+          ${wizardStep > 0 ? '<button class="btn btn-ghost" id="wizard-back">Back</button>' : '<div></div>'}
+          <button class="btn btn-primary" id="wizard-next">
+            ${wizardStep === 4 ? 'Create Agent' : 'Next'}
+          </button>
+        </div>
+      </div>`;
 
-      api('/api/agents').then(agents => {
-        for (const a of agents) {
-          const opt = el('option', { value: a.id }, a.name || a.id);
-          if (a.id === agentId) opt.selected = true;
-          agentSelect.appendChild(opt);
-        }
-        if (agentId) titleEl.textContent = `Chat: ${agents.find(a => a.id === agentId)?.name || agentId}`;
-      }).catch(() => {});
+    lucide.createIcons();
+    bindWizardEvents(container);
+  }
 
-      // Messages
-      const messages = el('div', { class: 'chat-messages' });
-      main.appendChild(messages);
+  async function wizardStep0() {
+    try {
+      const templates = await apiFetch('/api/templates');
+      return `
+        <h2 class="wizard-section-title">Choose a Template</h2>
+        <p class="wizard-section-desc">Start from a pre-built template or create from scratch.</p>
+        <div class="templates-grid">
+          <div class="template-card ${wizardData.template_id === null && !wizardData.templateObj ? 'selected' : ''}" data-tid="">
+            <div class="template-icon"><i data-lucide="wand" style="width:22px;height:22px"></i></div>
+            <div class="template-name">Blank</div>
+            <div class="template-desc">Build from scratch with custom goals and config.</div>
+          </div>
+          ${templates.map(t => `
+            <div class="template-card ${wizardData.template_id === t.id ? 'selected' : ''}" data-tid="${t.id}">
+              <div class="template-icon"><i data-lucide="${t.icon || 'bot'}" style="width:22px;height:22px"></i></div>
+              <div class="template-name">${escapeHtml(t.name)}</div>
+              <div class="template-desc">${escapeHtml(t.description || '')}</div>
+            </div>
+          `).join('')}
+        </div>`;
+    } catch (err) {
+      return `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
 
-      // Input
-      const inputRow = el('div', { class: 'chat-input-row' });
-      const textarea = el('textarea', { class: 'chat-textarea', placeholder: 'Type a message…', rows: '3' });
-      const sendBtn = el('button', { class: 'btn btn-primary', onclick: sendMessage }, 'Send');
-      inputRow.appendChild(textarea);
-      inputRow.appendChild(sendBtn);
-      main.appendChild(inputRow);
+  function wizardStep1() {
+    return `
+      <h2 class="wizard-section-title">Name Your Agent</h2>
+      <div class="wizard-field">
+        <label class="form-label">Agent Name <span class="form-required">*</span></label>
+        <input type="text" class="form-input" id="w-name" value="${escapeHtml(wizardData.name)}" placeholder="e.g. Daily SEO Monitor" required>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Description</label>
+        <textarea class="form-input" id="w-desc" rows="3" placeholder="What does this agent do?">${escapeHtml(wizardData.description)}</textarea>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Goals <span class="form-hint">(one per line)</span></label>
+        <textarea class="form-input" id="w-goals" rows="4" placeholder="Monitor keyword rankings daily&#10;Alert on ranking drops > 5 positions">${wizardData.goals.join('\n')}</textarea>
+      </div>`;
+  }
 
-      function appendMessage(role, text) {
-        const div = el('div', { class: `message message-${role}` });
-        const label = el('span', { class: 'message-role' }, role === 'user' ? 'You' : 'Agent');
-        const content = el('div', { class: 'message-content' });
-        content.textContent = text;
-        div.appendChild(label);
-        div.appendChild(content);
-        messages.appendChild(div);
-        messages.scrollTop = messages.scrollHeight;
-        return content;
+  async function wizardStep2() {
+    try {
+      const conns = await apiFetch('/api/connections');
+      const connected = conns.filter(c => c.status === 'connected');
+      return `
+        <h2 class="wizard-section-title">Add Connections</h2>
+        <p class="wizard-section-desc">Choose which services this agent can access.</p>
+        ${connected.length === 0
+          ? `<div class="card" style="text-align:center;padding:24px">
+               <p class="text-sm text-muted">No connections yet. <a href="#/connections">Set up connections</a> first.</p>
+             </div>`
+          : `<div class="connections-check-list">
+               ${connected.map(c => `
+                 <label class="connection-check-item">
+                   <input type="checkbox" value="${c.service}" ${wizardData.connections.includes(c.service) ? 'checked' : ''}>
+                   <span>${escapeHtml(c.service)}</span>
+                 </label>
+               `).join('')}
+             </div>`
+        }`;
+    } catch (err) {
+      return `<div class="empty-state"><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  function wizardStep3() {
+    const models = [
+      { id: 'gpt-4o-mini', label: 'GPT-4o Mini', desc: 'Fast and affordable' },
+      { id: 'gpt-4o', label: 'GPT-4o', desc: 'Powerful and accurate' },
+      { id: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', desc: 'Efficient and capable' },
+      { id: 'claude-3-5-sonnet-20241022', label: 'Claude 3.5 Sonnet', desc: 'Highly capable' },
+    ];
+    const schedules = [
+      { id: 'manual', label: 'Manual only' },
+      { id: 'hourly', label: 'Every hour' },
+      { id: 'daily', label: 'Daily' },
+      { id: 'weekly', label: 'Weekly' },
+    ];
+    return `
+      <h2 class="wizard-section-title">Configure Agent</h2>
+      <div class="wizard-field">
+        <label class="form-label">Model</label>
+        <div class="model-select-grid">
+          ${models.map(m => `
+            <label class="model-option ${wizardData.model === m.id ? 'selected' : ''}">
+              <input type="radio" name="model" value="${m.id}" ${wizardData.model === m.id ? 'checked' : ''}>
+              <div>
+                <div style="font-weight:600;font-size:13px">${m.label}</div>
+                <div style="font-size:11px;color:var(--color-text-muted)">${m.desc}</div>
+              </div>
+            </label>
+          `).join('')}
+        </div>
+      </div>
+      <div class="wizard-field">
+        <label class="form-label">Schedule</label>
+        <select class="form-input form-select" id="w-schedule">
+          ${schedules.map(s => `<option value="${s.id}" ${wizardData.schedule === s.id ? 'selected' : ''}>${s.label}</option>`).join('')}
+        </select>
+      </div>
+      <div class="wizard-2col">
+        <div class="wizard-field">
+          <label class="form-label">Temperature <span id="temp-val">${wizardData.temperature}</span></label>
+          <input type="range" class="form-range" id="w-temp" min="0" max="1" step="0.1" value="${wizardData.temperature}">
+        </div>
+        <div class="wizard-field">
+          <label class="form-label">Max Tokens</label>
+          <input type="number" class="form-input" id="w-tokens" value="${wizardData.max_tokens}" min="64" max="8192" step="64">
+        </div>
+      </div>`;
+  }
+
+  function wizardStep4() {
+    return `
+      <h2 class="wizard-section-title">Review &amp; Create</h2>
+      <div class="review-grid">
+        <div class="review-item"><span class="review-label">Name</span><span>${escapeHtml(wizardData.name || '—')}</span></div>
+        <div class="review-item"><span class="review-label">Template</span><span>${escapeHtml(wizardData.templateObj?.name || 'Blank')}</span></div>
+        <div class="review-item"><span class="review-label">Model</span><span>${escapeHtml(wizardData.model)}</span></div>
+        <div class="review-item"><span class="review-label">Schedule</span><span>${escapeHtml(wizardData.schedule)}</span></div>
+        <div class="review-item"><span class="review-label">Temperature</span><span>${wizardData.temperature}</span></div>
+        <div class="review-item"><span class="review-label">Max Tokens</span><span>${wizardData.max_tokens}</span></div>
+        <div class="review-item"><span class="review-label">Goals</span><span>${wizardData.goals.length} goal${wizardData.goals.length !== 1 ? 's' : ''}</span></div>
+        <div class="review-item"><span class="review-label">Connections</span><span>${wizardData.connections.length} selected</span></div>
+      </div>`;
+  }
+
+  function bindWizardEvents(container) {
+    // Template selection
+    container.querySelectorAll('.template-card').forEach(card => {
+      card.addEventListener('click', () => {
+        container.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+        wizardData.template_id = card.dataset.tid || null;
+      });
+    });
+
+    // Temp slider
+    const tempSlider = document.getElementById('w-temp');
+    if (tempSlider) {
+      tempSlider.addEventListener('input', () => {
+        document.getElementById('temp-val').textContent = tempSlider.value;
+      });
+    }
+
+    // Model radio
+    container.querySelectorAll('input[name="model"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        container.querySelectorAll('.model-option').forEach(o => o.classList.remove('selected'));
+        radio.closest('.model-option').classList.add('selected');
+      });
+    });
+
+    // Back button
+    document.getElementById('wizard-back')?.addEventListener('click', () => {
+      wizardStep--;
+      renderWizardStep(container);
+    });
+
+    // Next button
+    document.getElementById('wizard-next')?.addEventListener('click', async () => {
+      const btn = document.getElementById('wizard-next');
+
+      if (wizardStep === 1) {
+        const name = document.getElementById('w-name')?.value.trim();
+        if (!name) { toast('Agent name is required', 'error'); return; }
+        wizardData.name = name;
+        wizardData.description = document.getElementById('w-desc')?.value.trim() || '';
+        const goalsRaw = document.getElementById('w-goals')?.value || '';
+        wizardData.goals = goalsRaw.split('\n').map(g => g.trim()).filter(Boolean);
+      } else if (wizardStep === 2) {
+        wizardData.connections = [...container.querySelectorAll('.connection-check-item input:checked')].map(i => i.value);
+      } else if (wizardStep === 3) {
+        wizardData.model = container.querySelector('input[name="model"]:checked')?.value || 'gpt-4o-mini';
+        wizardData.schedule = document.getElementById('w-schedule')?.value || 'daily';
+        wizardData.temperature = parseFloat(document.getElementById('w-temp')?.value || '0.7');
+        wizardData.max_tokens = parseInt(document.getElementById('w-tokens')?.value || '1024');
       }
 
-      function sendMessage() {
-        const text = textarea.value.trim();
-        if (!text) return;
-        const selectedAgent = agentSelect.value;
-        if (!selectedAgent) { toast('Please select an agent', 'warning'); return; }
-        textarea.value = '';
-        appendMessage('user', text);
-        const botContent = appendMessage('assistant', '…');
-        botContent.textContent = '';
+      if (wizardStep === 4) {
+        // Create the agent
+        btn.disabled = true;
+        btn.textContent = 'Creating...';
+        try {
+          const payload = {
+            name: wizardData.name,
+            description: wizardData.description,
+            template_id: wizardData.template_id,
+            goals: wizardData.goals,
+            connections: wizardData.connections,
+            model: wizardData.model,
+            temperature: wizardData.temperature,
+            max_tokens: wizardData.max_tokens,
+            schedule: wizardData.schedule,
+            rules: wizardData.rules,
+          };
+          const agent = await apiFetch('/api/agents', { method: 'POST', body: JSON.stringify(payload) });
+          toast('Agent created successfully!', 'success');
+          navigate(`#/agent/${agent.id}`);
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.disabled = false;
+          btn.textContent = 'Create Agent';
+        }
+        return;
+      }
 
-        streamChat(
-          { agent_id: selectedAgent, message: text, model: CONFIG.defaultModel },
-          chunk => { botContent.textContent += chunk; messages.scrollTop = messages.scrollHeight; },
-          () => {},
-          err => { botContent.textContent = 'Error: ' + err.message; },
+      wizardStep++;
+      renderWizardStep(container);
+    });
+  }
+
+  // ── TEMPLATES VIEW ─────────────────────────
+  async function renderTemplates(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const templates = await apiFetch('/api/templates');
+      let html = `
+        <div class="page-header">
+          <h1 class="page-title">Templates</h1>
+          <p class="page-subtitle">${templates.length} ready-to-use agent template${templates.length !== 1 ? 's' : ''}</p>
+        </div>
+        <div class="templates-full-grid">`;
+
+      for (const t of templates) {
+        html += `
+          <div class="template-full-card">
+            <div class="template-full-header">
+              <div class="template-full-icon"><i data-lucide="${t.icon || 'bot'}" style="width:22px;height:22px"></i></div>
+              <div>
+                <div class="template-full-name">${escapeHtml(t.name)}</div>
+                <div class="template-full-category">${escapeHtml(t.category || 'General')}</div>
+              </div>
+            </div>
+            <p class="template-full-desc">${escapeHtml(t.description || '')}</p>
+            ${t.goals?.length ? `
+              <div class="template-full-goals">
+                <div class="text-sm" style="font-weight:600;margin-bottom:4px">Example Goals:</div>
+                <ul style="margin:0;padding-left:16px">
+                  ${t.goals.slice(0, 3).map(g => `<li class="text-sm text-muted">${escapeHtml(g)}</li>`).join('')}
+                </ul>
+              </div>` : ''}
+            <a href="#/wizard" class="btn btn-primary btn-sm" style="margin-top:12px" onclick="window.NC.prefillTemplate('${t.id}')">Use Template</a>
+          </div>`;
+      }
+      html += '</div>';
+      container.innerHTML = html;
+      lucide.createIcons();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load templates</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── CONNECTIONS VIEW ───────────────────────
+  async function renderConnections(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const conns = await apiFetch('/api/connections');
+
+      // Build a map of existing connections
+      const connMap = {};
+      for (const c of conns) connMap[c.service] = c;
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Connections</h1>
+          <p class="page-subtitle">Connect your services to use with AI agents</p>
+        </div>
+        <div id="conn-list"></div>`;
+
+      const connEl = document.getElementById('conn-list');
+
+      const services = [
+        { id: 'openai', name: 'OpenAI', icon: 'cpu', desc: 'GPT-4o and other OpenAI models', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk-...'}] },
+        { id: 'anthropic', name: 'Anthropic', icon: 'cpu', desc: 'Claude 3.5 models', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk-ant-...'}] },
+        { id: 'google_analytics', name: 'Google Analytics', icon: 'bar-chart-2', desc: 'Web traffic and behavior analytics', auth: 'oauth', oauthUrl: '/api/oauth/google' },
+        { id: 'google_search_console', name: 'Search Console', icon: 'search', desc: 'SEO performance and keyword data', auth: 'oauth', oauthUrl: '/api/oauth/google' },
+        { id: 'hubspot', name: 'HubSpot', icon: 'users', desc: 'CRM contacts, deals and marketing', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'pat-na1-...'}] },
+        { id: 'stripe', name: 'Stripe', icon: 'credit-card', desc: 'Payment and subscription data', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'sk_live_...'}] },
+        { id: 'slack', name: 'Slack', icon: 'message-square', desc: 'Team messaging and notifications', auth: 'oauth', oauthUrl: '/api/oauth/slack' },
+        { id: 'github', name: 'GitHub', icon: 'github', desc: 'Repositories, issues and PRs', auth: 'apikey', fields: [{id:'api_key',label:'Personal Access Token',type:'password',placeholder:'ghp_...'}] },
+        { id: 'ahrefs', name: 'Ahrefs', icon: 'link', desc: 'Backlink and keyword analysis', auth: 'apikey', fields: [{id:'api_key',label:'API Token',type:'password',placeholder:'...'}] },
+        { id: 'semrush', name: 'SEMrush', icon: 'trending-up', desc: 'SEO and competitor intelligence', auth: 'apikey', fields: [{id:'api_key',label:'API Key',type:'password',placeholder:'...'}] },
+        { id: 'airtable', name: 'Airtable', icon: 'table', desc: 'Database and spreadsheet automation', auth: 'apikey', fields: [{id:'api_key',label:'Personal Access Token',type:'password',placeholder:'patXXX...'}] },
+        { id: 'notion', name: 'Notion', icon: 'file-text', desc: 'Docs and database integration', auth: 'apikey', fields: [{id:'api_key',label:'Integration Token',type:'password',placeholder:'secret_...'}] },
+      ];
+
+      let html = '<div class="connections-grid">';
+      for (const svc of services) {
+        const conn = connMap[svc.id];
+        const isConnected = conn?.status === 'connected';
+        html += `
+          <div class="conn-card">
+            <div class="conn-card-header">
+              <div class="conn-icon"><i data-lucide="${svc.icon}" style="width:20px;height:20px"></i></div>
+              <div>
+                <div class="conn-name">${escapeHtml(svc.name)}</div>
+                <div class="conn-desc">${escapeHtml(svc.desc)}</div>
+              </div>
+            </div>
+            <div class="conn-status">
+              <span class="badge badge-${isConnected ? 'success' : 'idle'}">
+                ${isConnected ? 'Connected' : 'Not connected'}
+              </span>
+            </div>
+            <div class="conn-actions">
+              ${isConnected
+                ? `<button class="btn btn-ghost btn-sm disconnect-btn" data-service="${svc.id}">Disconnect</button>`
+                : svc.auth === 'oauth'
+                  ? `<button class="btn btn-primary btn-sm connect-btn" data-auth="oauth" data-service="${svc.id}" data-name="${svc.name}">Connect</button>`
+                  : `<button class="btn btn-primary btn-sm connect-btn" data-auth="apikey" data-service="${svc.id}" data-name="${svc.name}" data-fields='${JSON.stringify(svc.fields)}'>Connect</button>`
+              }
+            </div>
+          </div>`;
+      }
+      html += '</div>';
+      connEl.innerHTML = html;
+      lucide.createIcons();
+
+      // Bind disconnect
+      connEl.querySelectorAll('.disconnect-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Disconnect this service?')) return;
+          try {
+            await apiFetch(`/api/connections/${btn.dataset.service}`, { method: 'DELETE' });
+            toast('Disconnected', 'success');
+            renderConnections(container);
+          } catch (err) { toast(err.message, 'error'); }
+        });
+      });
+
+      // Bind connect
+      connEl.querySelectorAll('.connect-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const auth = btn.dataset.auth;
+          const service = btn.dataset.service;
+          const name = btn.dataset.name;
+          if (auth === 'oauth') {
+            startOAuthFlow(service, name);
+          } else {
+            const fields = btn.data
+        toast(`${serviceName} connected`, 'success');
+        overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      });
+    }
+  }
+
+  function startOAuthFlow(service, name) {
+    // Open OAuth popup
+    const width = 600, height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = window.open(
+      `/api/oauth/${service}`,
+      `oauth_${service}`,
+      `width=${width},height=${height},left=${left},top=${top}`
+    );
+
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkClosed);
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      }
+    }, 500);
+  }
+
+  function showApiKeyOverlay(service, name, fields) {
+    const overlay = el('div', { className: 'modal-overlay' });
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Connect ${escapeHtml(name)}</h3>
+          <button class="modal-close" id="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          ${fields.map(f => `
+            <div class="form-group">
+              <label class="form-label">${escapeHtml(f.label)}</label>
+              <input type="${f.type || 'text'}" class="form-input" id="field-${f.id}" placeholder="${escapeHtml(f.placeholder || '')}">
+            </div>
+          `).join('')}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="modal-cancel-btn">Cancel</button>
+          <button class="btn btn-primary" id="modal-save-btn">Connect</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById('modal-close-btn')?.addEventListener('click', () => overlay.remove());
+    document.getElementById('modal-cancel-btn')?.addEventListener('click', () => overlay.remove());
+    document.getElementById('modal-save-btn')?.addEventListener('click', async () => {
+      const credentials = {};
+      for (const f of fields) {
+        credentials[f.id] = document.getElementById(`field-${f.id}`)?.value.trim() || '';
+      }
+      const serviceId = service;
+      const serviceName = name;
+      try {
+        await apiFetch('/api/connections/apikey', {
+          method: 'POST',
+          body: JSON.stringify({ service: serviceId, ...credentials }),
+        });
+        toast(`${serviceName} connected`, 'success');
+        overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  }
+
+  // ── BILLING VIEW ───────────────────────────
+  async function renderBilling(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/billing');
+      const plan = data.plan || 'free';
+      const plans = [
+        {
+          id: 'free',
+          name: 'Free',
+          price: '$0',
+          period: '/month',
+          features: ['100 API calls/month', '3 agents', 'Community support'],
+          cta: 'Current Plan',
+          highlight: false,
+        },
+        {
+          id: 'pro',
+          name: 'Pro',
+          price: '$29',
+          period: '/month',
+          features: ['5,000 API calls/month', 'Unlimited agents', 'Priority support', 'Advanced analytics', 'Webhooks'],
+          cta: 'Upgrade to Pro',
+          highlight: true,
+        },
+        {
+          id: 'enterprise',
+          name: 'Enterprise',
+          price: 'Custom',
+          period: '',
+          features: ['Unlimited API calls', 'Unlimited agents', 'Dedicated support', 'SLA', 'Custom integrations'],
+          cta: 'Contact Sales',
+          highlight: false,
+        },
+      ];
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Billing</h1>
+          <p class="page-subtitle">Manage your subscription and usage</p>
+        </div>
+
+        <div class="kpi-grid" style="margin-bottom:32px">
+          <div class="kpi-card">
+            <div class="kpi-label">Current Plan</div>
+            <div class="kpi-value" style="text-transform:capitalize">${plan}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">API Calls Used</div>
+            <div class="kpi-value">${data.api_calls_this_month} / ${data.api_calls_limit}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Period End</div>
+            <div class="kpi-value" style="font-size:16px">${data.current_period_end ? formatDate(data.current_period_end) : 'N/A'}</div>
+          </div>
+        </div>
+
+        <div class="plans-grid">
+          ${plans.map(p => `
+            <div class="plan-card ${p.highlight ? 'plan-card-highlight' : ''} ${plan === p.id ? 'plan-card-current' : ''}">
+              ${p.highlight ? '<div class="plan-badge">Most Popular</div>' : ''}
+              <div class="plan-name">${p.name}</div>
+              <div class="plan-price">${p.price}<span class="plan-period">${p.period}</span></div>
+              <ul class="plan-features">
+                ${p.features.map(f => `<li><i data-lucide="check" style="width:14px;height:14px;color:#10b981"></i>${escapeHtml(f)}</li>`).join('')}
+              </ul>
+              <button class="btn ${p.highlight ? 'btn-primary' : 'btn-ghost'} plan-cta" data-plan="${p.id}"
+                ${plan === p.id ? 'disabled' : ''}>
+                ${plan === p.id ? '✓ ' + p.cta : p.cta}
+              </button>
+            </div>
+          `).join('')}
+        </div>`;
+
+      lucide.createIcons();
+
+      // Bind plan CTAs
+      container.querySelectorAll('.plan-cta').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const targetPlan = btn.dataset.plan;
+          if (targetPlan === plan) return;
+          if (targetPlan === 'enterprise') {
+            toast('Contact us at sales@example.com', 'info');
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = 'Processing...';
+          try {
+            const result = await apiFetch('/api/billing/checkout', {
+              method: 'POST',
+              body: JSON.stringify({ plan: targetPlan }),
+            });
+            if (result.url) {
+              window.location.href = result.url;
+            } else {
+              toast('Checkout initiated', 'info');
+            }
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = targetPlan === 'pro' ? 'Upgrade to Pro' : 'Downgrade to Free';
+          }
+        });
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load billing</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── SETTINGS VIEW ─────────────────────────
+  async function renderSettings(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const profile = await apiFetch('/api/profile');
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Settings</h1>
+          <p class="page-subtitle">Manage your account</p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Profile</h3></div>
+            <div class="form-group">
+              <label class="form-label">Display Name</label>
+              <input type="text" class="form-input" id="s-name" value="${escapeHtml(profile.display_name || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="s-email" value="${escapeHtml(profile.email || '')}" disabled>
+            </div>
+            <button class="btn btn-primary" id="save-profile-btn">Save Changes</button>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Password</h3></div>
+            <div class="form-group">
+              <label class="form-label">New Password</label>
+              <input type="password" class="form-input" id="s-pass" placeholder="Min. 6 characters" minlength="6">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Confirm Password</label>
+              <input type="password" class="form-input" id="s-pass2" placeholder="Repeat password">
+            </div>
+            <button class="btn btn-primary" id="save-pass-btn">Update Password</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;border:1px solid rgba(239,68,68,0.3)">
+          <div class="card-header"><h3 class="card-title" style="color:#ef4444">Danger Zone</h3></div>
+          <p class="text-sm text-muted">Deleting your account is permanent. All agents, runs, and connections will be removed.</p>
+          <button class="btn btn-danger" id="delete-account-btn" style="margin-top:12px">Delete Account</button>
+        </div>`;
+
+      document.getElementById('save-profile-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('save-profile-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+          const name = document.getElementById('s-name').value.trim();
+          await apiFetch('/api/profile', { method: 'PUT', body: JSON.stringify({ display_name: name }) });
+          cachedProfile = null;
+          toast('Profile updated', 'success');
+          await ensureProfile();
+        } catch (err) { toast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
+      });
+
+      document.getElementById('save-pass-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('save-pass-btn');
+        const pass = document.getElementById('s-pass').value;
+        const pass2 = document.getElementById('s-pass2').value;
+        if (!pass) { toast('Enter a new password', 'error'); return; }
+        if (pass !== pass2) { toast('Passwords do not match', 'error'); return; }
+        btn.disabled = true;
+        btn.textContent = 'Updating...';
+        try {
+          const { error } = await supabase.auth.updateUser({ password: pass });
+          if (error) throw error;
+          toast('Password updated', 'success');
+          document.getElementById('s-pass').value = '';
+          document.getElementById('s-pass2').value = '';
+        } catch (err) { toast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = 'Update Password'; }
+      });
+
+      document.getElementById('delete-account-btn')?.addEventListener('click', async () => {
+        if (!confirm('Are you sure? This cannot be undone.')) return;
+        if (!confirm('This will delete ALL your agents, runs, and connections. Continue?')) return;
+        try {
+          await apiFetch('/api/profile', { method: 'DELETE' });
+          await supabase.auth.signOut();
+          currentSession = null;
+          cachedProfile = null;
+          navigate('#/login');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load settings</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── FAN-OUT INTELLIGENCE ENGINE ────────────────
+  // Multi-model, multi-source intelligence gathering with
+  // deduplication, cross-referencing, and confidence scoring
+
+  const FanOutEngine = {
+    // Configuration for parallel query fanout
+    config: {
+      maxConcurrent: 6,
+      timeoutMs: 30000,
+      deduplicationThreshold: 0.85,
+      confidenceWeights: {
+        recency: 0.3,
+        sourceAuthority: 0.3,
+        crossReference: 0.25,
+        modelConsensus: 0.15,
+      },
+    },
+
+    // Source registry with capability metadata
+    sources: [
+      {
+        id: 'perplexity',
+        name: 'Perplexity AI',
+        type: 'search-ai',
+        capabilities: ['real-time', 'citations', 'synthesis'],
+        reliability: 0.92,
+        latencyMs: 2000,
+      },
+      {
+        id: 'openai-gpt4',
+        name: 'GPT-4o',
+        type: 'llm',
+        capabilities: ['reasoning', 'synthesis', 'code'],
+        reliability: 0.95,
+        latencyMs: 3000,
+      },
+      {
+        id: 'anthropic-claude',
+        name: 'Claude 3.5',
+        type: 'llm',
+        capabilities: ['reasoning', 'analysis', 'long-context'],
+        reliability: 0.94,
+        latencyMs: 2500,
+      },
+      {
+        id: 'google-search',
+        name: 'Google Search',
+        type: 'search',
+        capabilities: ['real-time', 'broad-coverage'],
+        reliability: 0.88,
+        latencyMs: 500,
+      },
+      {
+        id: 'internal-kb',
+        name: 'Internal Knowledge Base',
+        type: 'knowledge-base',
+        capabilities: ['domain-specific', 'authoritative'],
+        reliability: 0.97,
+        latencyMs: 100,
+      },
+    ],
+
+    // Execute parallel fan-out query
+    async query(task, context = {}) {
+      const startTime = Date.now();
+      const queryId = `fo_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      // Generate specialized sub-queries for each source
+      const subQueries = this.generateSubQueries(task, context);
+
+      // Execute in parallel with concurrency limit
+      const results = await this.executeParallel(subQueries, context);
+
+      // Deduplicate and cross-reference results
+      const deduplicated = this.deduplicateResults(results);
+
+      // Score and rank by confidence
+      const scored = this.scoreResults(deduplicated, context);
+
+      // Synthesize final intelligence report
+      const synthesis = this.synthesize(scored, task);
+
+      return {
+        queryId,
+        task,
+        duration: Date.now() - startTime,
+        sourcesQueried: results.length,
+        uniqueFindings: deduplicated.length,
+        synthesis,
+        results: scored,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          context,
+          config: this.config,
+        },
+      };
+    },
+
+    // Generate optimized sub-queries per source type
+    generateSubQueries(task, context) {
+      return this.sources.map(source => ({
+        source,
+        query: this.adaptQueryForSource(task, source, context),
+        priority: source.reliability,
+        timeout: Math.min(source.latencyMs * 3, this.config.timeoutMs),
+      }));
+    },
+
+    // Adapt query based on source capabilities
+    adaptQueryForSource(task, source, context) {
+      const baseQuery = task.query || task;
+      switch (source.type) {
+        case 'search-ai':
+          return `[Real-time search] ${baseQuery}. Provide citations and current data as of ${new Date().toDateString()}.`;
+        case 'llm':
+          return `[Deep analysis] ${baseQuery}. Context: ${JSON.stringify(context)}. Provide structured analysis with confidence levels.`;
+        case 'search':
+          return baseQuery;
+        case 'knowledge-base':
+          return `[KB lookup] ${baseQuery}. Return relevant internal documents and policies.`;
+        default:
+          return baseQuery;
+      }
+    },
+
+    // Execute queries in parallel with concurrency control
+    async executeParallel(subQueries, context) {
+      const results = [];
+      const batches = [];
+
+      for (let i = 0; i < subQueries.length; i += this.config.maxConcurrent) {
+        batches.push(subQueries.slice(i, i + this.config.maxConcurrent));
+      }
+
+      for (const batch of batches) {
+        const batchResults = await Promise.allSettled(
+          batch.map(sq => this.executeQuery(sq, context))
+        );
+        results.push(...batchResults
+          .filter(r => r.status === 'fulfilled')
+          .map(r => r.value)
         );
       }
 
-      textarea.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-      });
-    });
-  });
+      return results;
+    },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: KNOWLEDGE BASE
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/knowledge', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/knowledge'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
+    // Execute individual query with timeout and error handling
+    async executeQuery(subQuery, context) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), subQuery.timeout);
 
-      const header = el('div', { class: 'page-header' });
-      header.appendChild(el('h1', {}, 'Knowledge Base'));
-      main.appendChild(header);
-
-      // Search + Add row
-      const toolbar = el('div', { class: 'toolbar' });
-      const searchInput = el('input', { type: 'text', class: 'form-input', placeholder: 'Search knowledge…' });
-      const addBtn = el('button', { class: 'btn btn-primary', onclick: showAddForm }, '+ Add Entry');
-      toolbar.appendChild(searchInput);
-      toolbar.appendChild(addBtn);
-      main.appendChild(toolbar);
-
-      const resultsDiv = el('div', { class: 'knowledge-results' });
-      main.appendChild(resultsDiv);
-
-      let allEntries = [];
-
-      function renderEntries(entries) {
-        setHTML(resultsDiv, '');
-        if (!entries.length) {
-          resultsDiv.appendChild(el('p', { class: 'empty-msg' }, 'No entries found.'));
-          return;
-        }
-        for (const entry of entries) {
-          const card = el('div', { class: 'knowledge-card' });
-          card.appendChild(el('div', { class: 'knowledge-title' }, entry.title || entry.id));
-          card.appendChild(el('div', { class: 'knowledge-snippet' }, (entry.content || '').slice(0, 200) + '…'));
-          const actions = el('div', { class: 'card-actions' });
-          actions.appendChild(el('button', { class: 'btn btn-sm', onclick: () => viewEntry(entry) }, 'View'));
-          actions.appendChild(el('button', { class: 'btn btn-sm btn-danger', onclick: () => deleteEntry(entry.id, card) }, 'Delete'));
-          card.appendChild(actions);
-          resultsDiv.appendChild(card);
-        }
+      try {
+        // Simulate source-specific query execution
+        // In production, this would call actual APIs
+        const mockResult = await this.simulateSourceQuery(subQuery, context, controller.signal);
+        return {
+          sourceId: subQuery.source.id,
+          sourceName: subQuery.source.name,
+          sourceType: subQuery.source.type,
+          query: subQuery.query,
+          result: mockResult,
+          latency: Math.random() * subQuery.source.latencyMs,
+          success: true,
+        };
+      } catch (err) {
+        return {
+          sourceId: subQuery.source.id,
+          sourceName: subQuery.source.name,
+          query: subQuery.query,
+          error: err.message,
+          success: false,
+        };
+      } finally {
+        clearTimeout(timeout);
       }
+    },
 
-      api('/api/knowledge').then(data => {
-        allEntries = Array.isArray(data) ? data : (data.entries || []);
-        renderEntries(allEntries);
-      }).catch(e => { resultsDiv.textContent = 'Error: ' + e.message; });
-
-      searchInput.addEventListener('input', () => {
-        const q = searchInput.value.toLowerCase();
-        renderEntries(allEntries.filter(e =>
-          (e.title || '').toLowerCase().includes(q) ||
-          (e.content || '').toLowerCase().includes(q)
-        ));
+    // Simulate query execution (replace with real API calls in production)
+    async simulateSourceQuery(subQuery, context, signal) {
+      await new Promise((resolve, reject) => {
+        const delay = Math.random() * subQuery.source.latencyMs;
+        const t = setTimeout(resolve, delay);
+        signal.addEventListener('abort', () => {
+          clearTimeout(t);
+          reject(new Error('Query timed out'));
+        });
       });
 
-      function viewEntry(entry) {
-        const modal = buildModal(entry.title || 'Entry', entry.content || '');
-        document.body.appendChild(modal);
-      }
-
-      async function deleteEntry(id, card) {
-        if (!confirm('Delete this entry?')) return;
-        try {
-          await api(`/api/knowledge/${id}`, { method: 'DELETE' });
-          card.remove();
-          toast('Entry deleted', 'success');
-        } catch (e) {
-          toast('Error: ' + e.message, 'error');
-        }
-      }
-
-      function showAddForm() {
-        const modal = document.createElement('div');
-        modal.className = 'modal-overlay';
-        const box = el('div', { class: 'modal-box' });
-        box.appendChild(el('h2', {}, 'Add Knowledge Entry'));
-        const titleInput = el('input', { type: 'text', class: 'form-input', placeholder: 'Title' });
-        const contentTA = el('textarea', { class: 'form-textarea', rows: '6', placeholder: 'Content…' });
-        const row = el('div', { class: 'modal-actions' });
-        const saveBtn = el('button', { class: 'btn btn-primary', onclick: async () => {
-          const title = titleInput.value.trim();
-          const content = contentTA.value.trim();
-          if (!title || !content) { toast('Title and content required', 'warning'); return; }
-          try {
-            await api('/api/knowledge', { method: 'POST', body: JSON.stringify({ title, content }) });
-            modal.remove();
-            toast('Entry added', 'success');
-            navigate('#/knowledge');
-          } catch (e) { toast('Error: ' + e.message, 'error'); }
-        }}, 'Save');
-        const cancelBtn = el('button', { class: 'btn', onclick: () => modal.remove() }, 'Cancel');
-        row.appendChild(saveBtn);
-        row.appendChild(cancelBtn);
-        box.appendChild(titleInput);
-        box.appendChild(contentTA);
-        box.appendChild(row);
-        modal.appendChild(box);
-        document.body.appendChild(modal);
-      }
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: ANALYTICS
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/analytics', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/analytics'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      main.appendChild(el('h1', {}, 'Analytics'));
-
-      const grid = el('div', { class: 'analytics-grid' });
-      main.appendChild(grid);
-
-      api('/api/analytics/summary').then(data => {
-        const metrics = [
-          { label: 'Total Messages', value: data.total_messages || 0 },
-          { label: 'Total Tokens', value: formatNum(data.total_tokens || 0) },
-          { label: 'Total Cost', value: '$' + (data.total_cost || 0).toFixed(4) },
-          { label: 'Avg Tokens/Msg', value: formatNum(data.avg_tokens || 0) },
-          { label: 'Messages Today', value: data.messages_today || 0 },
-          { label: 'Cost Today', value: '$' + (data.cost_today || 0).toFixed(4) },
-        ];
-        for (const m of metrics) {
-          const card = el('div', { class: 'stat-card' });
-          card.appendChild(el('div', { class: 'stat-value' }, String(m.value)));
-          card.appendChild(el('div', { class: 'stat-label' }, m.label));
-          grid.appendChild(card);
-        }
-      }).catch(e => main.appendChild(el('p', {}, 'Error: ' + e.message)));
-
-      // Model usage chart placeholder
-      const chartSection = el('div', { class: 'chart-section' });
-      main.appendChild(chartSection);
-      chartSection.appendChild(el('h2', {}, 'Usage by Model'));
-
-      api('/api/analytics/by-model').then(data => {
-        if (!data || !data.length) {
-          chartSection.appendChild(el('p', { class: 'empty-msg' }, 'No data yet.'));
-          return;
-        }
-        const table = el('table', { class: 'data-table' });
-        const thead = el('thead', {});
-        thead.appendChild(el('tr', {},
-          el('th', {}, 'Model'),
-          el('th', {}, 'Messages'),
-          el('th', {}, 'Tokens'),
-          el('th', {}, 'Cost'),
-        ));
-        table.appendChild(thead);
-        const tbody = el('tbody', {});
-        for (const row of data) {
-          tbody.appendChild(el('tr', {},
-            el('td', {}, row.model),
-            el('td', {}, String(row.messages || 0)),
-            el('td', {}, formatNum(row.tokens || 0)),
-            el('td', {}, '$' + (row.cost || 0).toFixed(4)),
-          ));
-        }
-        table.appendChild(tbody);
-        chartSection.appendChild(table);
-      }).catch(() => {});
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: SETTINGS
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/settings', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/settings'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      main.appendChild(el('h1', {}, 'Settings'));
-
-      api('/api/settings').then(settings => {
-        const form = el('form', { class: 'settings-form', onsubmit: async e => {
-          e.preventDefault();
-          const data = {};
-          for (const input of $$('input, select, textarea', form)) {
-            if (input.name) data[input.name] = input.type === 'checkbox' ? input.checked : input.value;
-          }
-          try {
-            await api('/api/settings', { method: 'POST', body: JSON.stringify(data) });
-            toast('Settings saved', 'success');
-          } catch (e) { toast('Error: ' + e.message, 'error'); }
-        }});
-
-        const fields = [
-          { name: 'openai_api_key', label: 'OpenAI API Key', type: 'password', placeholder: 'sk-…' },
-          { name: 'default_model', label: 'Default Model', type: 'select', options: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-          { name: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '2048' },
-          { name: 'temperature', label: 'Temperature', type: 'number', placeholder: '0.7', step: '0.1', min: '0', max: '2' },
-          { name: 'system_prompt', label: 'Default System Prompt', type: 'textarea', rows: '4' },
-        ];
-
-        for (const f of fields) {
-          const group = el('div', { class: 'form-group' });
-          group.appendChild(el('label', { class: 'form-label' }, f.label));
-          let input;
-          if (f.type === 'select') {
-            input = el('select', { name: f.name, class: 'form-select' });
-            for (const opt of f.options) {
-              const o = el('option', { value: opt }, opt);
-              if ((settings[f.name] || CONFIG.defaultModel) === opt) o.selected = true;
-              input.appendChild(o);
-            }
-          } else if (f.type === 'textarea') {
-            input = el('textarea', { name: f.name, class: 'form-textarea', rows: f.rows || '3' });
-            input.value = settings[f.name] || '';
-          } else {
-            const attrs = { name: f.name, type: f.type, class: 'form-input' };
-            if (f.placeholder) attrs.placeholder = f.placeholder;
-            if (f.step) attrs.step = f.step;
-            if (f.min) attrs.min = f.min;
-            if (f.max) attrs.max = f.max;
-            input = el('input', attrs);
-            input.value = settings[f.name] || '';
-          }
-          group.appendChild(input);
-          form.appendChild(group);
-        }
-
-        const submitBtn = el('button', { type: 'submit', class: 'btn btn-primary' }, 'Save Settings');
-        form.appendChild(submitBtn);
-        main.appendChild(form);
-      }).catch(e => main.appendChild(el('p', {}, 'Error loading settings: ' + e.message)));
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: WIZARD (Create/Edit Agent)
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/wizard', function () {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
-    const editId = params.get('edit');
-
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/agents'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      main.appendChild(el('h1', {}, editId ? 'Edit Agent' : 'New Agent'));
-
-      const form = el('form', { class: 'agent-form' });
-      main.appendChild(form);
-
-      const fields = [
-        { name: 'name', label: 'Agent Name', type: 'text', placeholder: 'My Agent', required: true },
-        { name: 'model', label: 'Model', type: 'select', options: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-        { name: 'temperature', label: 'Temperature', type: 'number', placeholder: '0.7', step: '0.1', min: '0', max: '2' },
-        { name: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '2048' },
-        { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: '5' },
-        { name: 'schedule', label: 'Schedule', type: 'select', options: ['manual', 'hourly', 'daily', 'weekly'] },
-      ];
-
-      const formData = {};
-
-      const buildForm = (existing = {}) => {
-        setHTML(form, '');
-        for (const f of fields) {
-          const group = el('div', { class: 'form-group' });
-          group.appendChild(el('label', { class: 'form-label' }, f.label));
-          let input;
-          if (f.type === 'select') {
-            input = el('select', { name: f.name, class: 'form-select' });
-            for (const opt of f.options) {
-              const o = el('option', { value: opt }, opt);
-              if (existing[f.name] === opt) o.selected = true;
-              input.appendChild(o);
-            }
-          } else if (f.type === 'textarea') {
-            input = el('textarea', { name: f.name, class: 'form-textarea', rows: f.rows || '3', placeholder: f.placeholder || '' });
-            input.value = existing[f.name] || '';
-          } else {
-            const attrs = { name: f.name, type: f.type, class: 'form-input', placeholder: f.placeholder || '' };
-            if (f.step) attrs.step = f.step;
-            if (f.min) attrs.min = f.min;
-            if (f.max) attrs.max = f.max;
-            if (f.required) attrs.required = 'true';
-            input = el('input', attrs);
-            input.value = existing[f.name] || '';
-          }
-          group.appendChild(input);
-          form.appendChild(group);
-        }
-
-        // Knowledge base multi-select
-        const kGroup = el('div', { class: 'form-group' });
-        kGroup.appendChild(el('label', { class: 'form-label' }, 'Knowledge Bases'));
-        const kSelect = el('select', { name: 'knowledge_ids', class: 'form-select', multiple: 'true', size: '4' });
-        api('/api/knowledge').then(kData => {
-          const entries = Array.isArray(kData) ? kData : (kData.entries || []);
-          for (const k of entries) {
-            const o = el('option', { value: k.id }, k.title || k.id);
-            if ((existing.knowledge_ids || []).includes(k.id)) o.selected = true;
-            kSelect.appendChild(o);
-          }
-        }).catch(() => {});
-        kGroup.appendChild(kSelect);
-        form.appendChild(kGroup);
-
-        // Rules
-        const rGroup = el('div', { class: 'form-group' });
-        rGroup.appendChild(el('label', { class: 'form-label' }, 'Rules (one per line)'));
-        const rTA = el('textarea', { name: 'rules', class: 'form-textarea', rows: '3', placeholder: 'Be concise\nAlways cite sources' });
-        rTA.value = (existing.rules || []).join('\n');
-        rGroup.appendChild(rTA);
-        form.appendChild(rGroup);
-
-        const active = el('div', { class: 'form-group form-check' });
-        const activeInput = el('input', { type: 'checkbox', name: 'active', id: 'active-check' });
-        if (existing.active !== false) activeInput.checked = true;
-        active.appendChild(activeInput);
-        active.appendChild(el('label', { for: 'active-check' }, 'Active'));
-        form.appendChild(active);
-
-        const btnRow = el('div', { class: 'form-actions' });
-        const saveBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => saveAgent(existing.id) }, editId ? 'Update Agent' : 'Create Agent');
-        const cancelBtn = el('button', { type: 'button', class: 'btn', onclick: () => navigate('#/agents') }, 'Cancel');
-        btnRow.appendChild(saveBtn);
-        btnRow.appendChild(cancelBtn);
-        form.appendChild(btnRow);
+      return {
+        findings: [
+          { text: `Finding from ${subQuery.source.name}: relevant data point`, confidence: 0.8 + Math.random() * 0.15 },
+          { text: `Secondary insight from ${subQuery.source.name}`, confidence: 0.7 + Math.random() * 0.2 },
+        ],
+        citations: subQuery.source.type === 'search-ai' ? ['https://example.com/source1', 'https://example.com/source2'] : [],
+        rawResponse: `[Simulated response from ${subQuery.source.name}]`,
       };
+    },
 
-      if (editId) {
-        api(`/api/agents/${editId}`).then(agent => buildForm(agent)).catch(() => buildForm({}));
-      } else {
-        buildForm({});
+    // Deduplicate results using semantic similarity
+    deduplicateResults(results) {
+      const allFindings = results
+        .filter(r => r.success && r.result?.findings)
+        .flatMap(r => r.result.findings.map(f => ({ ...f, source: r.sourceId })));
+
+      // Simple deduplication: remove near-identical findings
+      // In production, use embedding similarity
+      const unique = [];
+      for (const finding of allFindings) {
+        const isDuplicate = unique.some(u =>
+          this.stringSimilarity(u.text, finding.text) > this.config.deduplicationThreshold
+        );
+        if (!isDuplicate) unique.push(finding);
       }
 
-      async function saveAgent(existingId) {
-        const data = { rules: [], knowledge_ids: [] };
-        for (const input of $$('input, select, textarea', form)) {
-          if (!input.name) continue;
-          if (input.type === 'checkbox') { data[input.name] = input.checked; }
-          else if (input.name === 'rules') { data.rules = input.value.split('\n').map(r => r.trim()).filter(Boolean); }
-          else if (input.name === 'knowledge_ids') {
-            data.knowledge_ids = [...input.options].filter(o => o.selected).map(o => o.value);
-          }
-          else { data[input.name] = input.value; }
-        }
-        try {
-          if (existingId) {
-            await api(`/api/agents/${existingId}`, { method: 'PUT', body: JSON.stringify(data) });
-            toast('Agent updated', 'success');
-          } else {
-            await api('/api/agents', { method: 'POST', body: JSON.stringify(data) });
-            toast('Agent created', 'success');
-          }
-          navigate('#/agents');
-        } catch (e) { toast('Error: ' + e.message, 'error'); }
-      }
-    });
-  });
+      return unique;
+    },
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: COMMAND CENTER  ← AI Search Bible integration
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/command', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/command'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
+    // Simple string similarity (Jaccard-like)
+    stringSimilarity(a, b) {
+      const setA = new Set(a.toLowerCase().split(/\s+/));
+      const setB = new Set(b.toLowerCase().split(/\s+/));
+      const intersection = [...setA].filter(w => setB.has(w)).length;
+      const union = new Set([...setA, ...setB]).size;
+      return intersection / union;
+    },
 
-      main.appendChild(el('h1', {}, 'Command Center'));
+    // Score results by multi-factor confidence
+    scoreResults(findings, context) {
+      return findings.map(finding => ({
+        ...finding,
+        score: this.calculateConfidenceScore(finding, context),
+      })).sort((a, b) => b.score - a.score);
+    },
 
-      // Tab bar
-      const tabs = [
-        { id: 'fanout',      label: 'Fan-Out Analysis' },
-        { id: 'croutonize', label: 'Croutonizer' },
-        { id: 'scorer',     label: 'Inference Cost Scorer' },
-        { id: 'run',        label: 'Run Agent' },
-        { id: 'batch',      label: 'Batch Run' },
-        { id: 'logs',       label: 'Logs' },
-      ];
+    // Multi-factor confidence scoring
+    calculateConfidenceScore(finding, context) {
+      const w = this.config.confidenceWeights;
+      const baseConfidence = finding.confidence || 0.5;
 
-      const tabBar = el('div', { class: 'tab-bar' });
-      const tabContent = el('div', { class: 'tab-content' });
-      main.appendChild(tabBar);
-      main.appendChild(tabContent);
+      // Recency bonus (findings from real-time sources score higher)
+      const recencyScore = finding.source === 'perplexity' || finding.source === 'google-search' ? 1.0 : 0.6;
 
-      let activeTab = 'fanout';
+      // Source authority (internal KB and LLMs score higher)
+      const authorityScore = finding.source === 'internal-kb' ? 1.0 :
+        finding.source?.includes('openai') || finding.source?.includes('anthropic') ? 0.9 : 0.7;
 
-      function renderTab(id) {
-        activeTab = id;
-        $$('.tab-btn', tabBar).forEach(b => b.classList.toggle('active', b.dataset.tab === id));
-        setHTML(tabContent, '');
-        switch (id) {
-          case 'fanout':      renderFanout(tabContent); break;
-          case 'croutonize':  renderCroutonize(tabContent); break;
-          case 'scorer':      renderScorer(tabContent); break;
-          case 'run':         renderRunAgent(tabContent); break;
-          case 'batch':       renderBatchRun(tabContent); break;
-          case 'logs':        renderLogs(tabContent); break;
-        }
-      }
+      // Cross-reference bonus (found in multiple sources)
+      const crossRefScore = 0.7; // Simplified; production would check overlap
 
-      for (const t of tabs) {
-        const btn = el('button', { class: `tab-btn${t.id === activeTab ? ' active' : ''}`, 'data-tab': t.id, onclick: () => renderTab(t.id) }, t.label);
-        tabBar.appendChild(btn);
-      }
+      // Model consensus (simplified)
+      const consensusScore = baseConfidence;
 
-      renderTab(activeTab);
-    });
-  });
-
-  // ── Tab: Fan-Out Analysis ──────────────────────────────────────────────────
-  function renderFanout(container) {
-    container.appendChild(el('h2', {}, 'Fan-Out Query Analysis'));
-    container.appendChild(el('p', { class: 'tab-desc' },
-      'Analyze how a query fans out across AI search surfaces using the AI Search Bible doctrine.'
-    ));
-
-    const form = el('div', { class: 'cmd-form' });
-    container.appendChild(form);
-
-    const qInput = el('input', { type: 'text', class: 'form-input', placeholder: 'Enter a search query or topic…' });
-    form.appendChild(el('label', { class: 'form-label' }, 'Query'));
-    form.appendChild(qInput);
-
-    const surfaceOptions = [
-      'ChatGPT', 'Perplexity', 'Google AI Overview', 'Bing Copilot',
-      'Claude', 'Gemini', 'Meta AI', 'You.com',
-    ];
-    form.appendChild(el('label', { class: 'form-label' }, 'Target Surfaces'));
-    const surfaceGrid = el('div', { class: 'checkbox-grid' });
-    const surfaceChecks = {};
-    for (const s of surfaceOptions) {
-      const id = 'surf-' + s.replace(/\s+/g, '-').toLowerCase();
-      const cb = el('input', { type: 'checkbox', id, checked: 'true' });
-      surfaceChecks[s] = cb;
-      const lbl = el('label', { for: id, class: 'check-label' }, s);
-      const wrap = el('div', { class: 'check-wrap' });
-      wrap.appendChild(cb);
-      wrap.appendChild(lbl);
-      surfaceGrid.appendChild(wrap);
-    }
-    form.appendChild(surfaceGrid);
-
-    const runBtn = el('button', { class: 'btn btn-primary', onclick: runFanout }, 'Analyze Fan-Out');
-    form.appendChild(runBtn);
-
-    const resultsDiv = el('div', { class: 'fanout-results' });
-    container.appendChild(resultsDiv);
-
-    async function runFanout() {
-      const query = qInput.value.trim();
-      if (!query) { toast('Enter a query', 'warning'); return; }
-      const surfaces = Object.entries(surfaceChecks)
-        .filter(([, cb]) => cb.checked)
-        .map(([s]) => s);
-      if (!surfaces.length) { toast('Select at least one surface', 'warning'); return; }
-
-      setHTML(resultsDiv, '<div class="loading-spinner">Analyzing fan-out…</div>');
-      runBtn.disabled = true;
-
-      try {
-        const result = await api('/api/command/fanout', {
-          method: 'POST',
-          body: JSON.stringify({ query, surfaces }),
-        });
-        renderFanoutResults(resultsDiv, result);
-      } catch (e) {
-        setHTML(resultsDiv, `<p class="error-msg">Error: ${e.message}</p>`);
-      } finally {
-        runBtn.disabled = false;
-      }
-    }
-  }
-
-  function renderFanoutResults(container, result) {
-    setHTML(container, '');
-    if (!result) { container.appendChild(el('p', {}, 'No results.')); return; }
-
-    // Overall score
-    if (result.overall_score !== undefined) {
-      const scoreBar = el('div', { class: 'score-bar-wrap' });
-      scoreBar.appendChild(el('span', { class: 'score-label' }, `Overall AI Search Score: `));
-      scoreBar.appendChild(el('span', { class: 'score-value' }, `${result.overall_score}/100`));
-      const bar = el('div', { class: 'score-bar' });
-      const fill = el('div', { class: 'score-fill', style: { width: `${result.overall_score}%` } });
-      bar.appendChild(fill);
-      scoreBar.appendChild(bar);
-      container.appendChild(scoreBar);
-    }
-
-    // Surface breakdown
-    if (result.surfaces && result.surfaces.length) {
-      const section = el('div', { class: 'fanout-surfaces' });
-      section.appendChild(el('h3', {}, 'Surface Breakdown'));
-      const grid = el('div', { class: 'surface-grid' });
-      for (const s of result.surfaces) {
-        const card = el('div', { class: 'surface-card' });
-        card.appendChild(el('div', { class: 'surface-name' }, s.surface));
-        if (s.score !== undefined) {
-          const sb = el('div', { class: 'surface-score' });
-          sb.appendChild(el('span', {}, `Score: ${s.score}/100`));
-          const mini = el('div', { class: 'mini-bar' });
-          mini.appendChild(el('div', { class: 'mini-fill', style: { width: `${s.score}%` } }));
-          sb.appendChild(mini);
-          card.appendChild(sb);
-        }
-        if (s.reasoning) card.appendChild(el('div', { class: 'surface-reasoning' }, s.reasoning));
-        if (s.recommendations && s.recommendations.length) {
-          const ul = el('ul', { class: 'surface-recs' });
-          for (const r of s.recommendations) ul.appendChild(el('li', {}, r));
-          card.appendChild(ul);
-        }
-        grid.appendChild(card);
-      }
-      section.appendChild(grid);
-      container.appendChild(section);
-    }
-
-    // Croutons cited
-    if (result.croutons_cited && result.croutons_cited.length) {
-      const section = el('div', { class: 'croutons-cited' });
-      section.appendChild(el('h3', {}, 'Doctrine Applied'));
-      const ul = el('ul', {});
-      for (const c of result.croutons_cited) {
-        ul.appendChild(el('li', {}, `[${c.id}] ${c.title}`));
-      }
-      section.appendChild(ul);
-      container.appendChild(section);
-    }
-
-    // Raw JSON toggle
-    const toggle = el('details', { class: 'raw-json-toggle' });
-    toggle.appendChild(el('summary', {}, 'Raw JSON'));
-    const pre = el('pre', { class: 'raw-json' });
-    pre.textContent = JSON.stringify(result, null, 2);
-    toggle.appendChild(pre);
-    container.appendChild(toggle);
-  }
-
-  // ── Tab: Croutonizer ───────────────────────────────────────────────────────
-  function renderCroutonize(container) {
-    container.appendChild(el('h2', {}, 'Content Croutonizer'));
-    container.appendChild(el('p', { class: 'tab-desc' },
-      'Break down any content into AI-Search-Bible croutons — atomic, citable knowledge units.'
-    ));
-
-    const form = el('div', { class: 'cmd-form' });
-    container.appendChild(form);
-
-    form.appendChild(el('label', { class: 'form-label' }, 'Content to Croutonize'));
-    const contentTA = el('textarea', { class: 'form-textarea', rows: '8',
-      placeholder: 'Paste any content here — blog post, documentation, transcript…' });
-    form.appendChild(contentTA);
-
-    const optRow = el('div', { class: 'option-row' });
-    optRow.appendChild(el('label', { class: 'form-label' }, 'Target crouton type:'));
-    const typeSelect = el('select', { class: 'form-select' });
-    for (const t of ['fact', 'doctrine', 'how-to', 'example', 'comparison', 'definition']) {
-      typeSelect.appendChild(el('option', { value: t }, t));
-    }
-    optRow.appendChild(typeSelect);
-    form.appendChild(optRow);
-
-    const runBtn = el('button', { class: 'btn btn-primary', onclick: runCroutonize }, 'Croutonize');
-    form.appendChild(runBtn);
-
-    const resultsDiv = el('div', { class: 'croutonize-results' });
-    container.appendChild(resultsDiv);
-
-    async function runCroutonize() {
-      const content = contentTA.value.trim();
-      if (!content) { toast('Enter some content', 'warning'); return; }
-      const crouton_type = typeSelect.value;
-
-      setHTML(resultsDiv, '<div class="loading-spinner">Croutonizing…</div>');
-      runBtn.disabled = true;
-
-      try {
-        const result = await api('/api/command/croutonize', {
-          method: 'POST',
-          body: JSON.stringify({ content, crouton_type }),
-        });
-        renderCroutonizeResults(resultsDiv, result);
-      } catch (e) {
-        setHTML(resultsDiv, `<p class="error-msg">Error: ${e.message}</p>`);
-      } finally {
-        runBtn.disabled = false;
-      }
-    }
-  }
-
-  function renderCroutonizeResults(container, result) {
-    setHTML(container, '');
-    if (!result || !result.croutons) {
-      container.appendChild(el('p', {}, 'No croutons generated.'));
-      return;
-    }
-    const header = el('div', { class: 'crouton-header' });
-    header.appendChild(el('span', { class: 'crouton-count' }, `${result.croutons.length} croutons generated`));
-    container.appendChild(header);
-
-    for (const c of result.croutons) {
-      const card = el('div', { class: `crouton-card crouton-type-${c.type || 'fact'}` });
-      const cardHeader = el('div', { class: 'crouton-card-header' });
-      cardHeader.appendChild(el('span', { class: 'crouton-id' }, c.id || ''));
-      cardHeader.appendChild(el('span', { class: `crouton-type-badge type-${c.type || 'fact'}` }, c.type || 'fact'));
-      card.appendChild(cardHeader);
-      if (c.title) card.appendChild(el('div', { class: 'crouton-title' }, c.title));
-      if (c.content) card.appendChild(el('div', { class: 'crouton-content' }, c.content));
-      if (c.tags && c.tags.length) {
-        const tagRow = el('div', { class: 'crouton-tags' });
-        for (const tag of c.tags) tagRow.appendChild(el('span', { class: 'tag' }, tag));
-        card.appendChild(tagRow);
-      }
-      container.appendChild(card);
-    }
-
-    if (result.ndjson) {
-      const toggle = el('details', { class: 'raw-json-toggle' });
-      toggle.appendChild(el('summary', {}, 'Export NDJSON'));
-      const pre = el('pre', { class: 'raw-json' });
-      pre.textContent = result.ndjson;
-      toggle.appendChild(pre);
-      const copyBtn = el('button', { class: 'btn btn-sm', onclick: () => {
-        navigator.clipboard.writeText(result.ndjson).then(() => toast('Copied!', 'success'));
-      }}, 'Copy NDJSON');
-      toggle.appendChild(copyBtn);
-      container.appendChild(toggle);
-    }
-  }
-
-  // ── Tab: Inference Cost Scorer ─────────────────────────────────────────────
-  function renderScorer(container) {
-    container.appendChild(el('h2', {}, 'Inference Cost Scorer'));
-    container.appendChild(el('p', { class: 'tab-desc' },
-      'Estimate the AI inference cost and token usage for your prompts across different models.'
-    ));
-
-    const form = el('div', { class: 'cmd-form' });
-    container.appendChild(form);
-
-    form.appendChild(el('label', { class: 'form-label' }, 'System Prompt'));
-    const sysTA = el('textarea', { class: 'form-textarea', rows: '3', placeholder: 'System prompt…' });
-    form.appendChild(sysTA);
-
-    form.appendChild(el('label', { class: 'form-label' }, 'User Message'));
-    const userTA = el('textarea', { class: 'form-textarea', rows: '3', placeholder: 'User message…' });
-    form.appendChild(userTA);
-
-    const modelOptions = [
-      { id: 'gpt-4o', label: 'GPT-4o', input: 0.005, output: 0.015 },
-      { id: 'gpt-4o-mini', label: 'GPT-4o mini', input: 0.00015, output: 0.0006 },
-      { id: 'gpt-4-turbo', label: 'GPT-4 Turbo', input: 0.01, output: 0.03 },
-      { id: 'gpt-3.5-turbo', label: 'GPT-3.5 Turbo', input: 0.0005, output: 0.0015 },
-      { id: 'claude-3-5-sonnet', label: 'Claude 3.5 Sonnet', input: 0.003, output: 0.015 },
-      { id: 'claude-3-haiku', label: 'Claude 3 Haiku', input: 0.00025, output: 0.00125 },
-      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', input: 0.00125, output: 0.005 },
-      { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash', input: 0.000075, output: 0.0003 },
-    ];
-
-    form.appendChild(el('label', { class: 'form-label' }, 'Models to Compare'));
-    const modelGrid = el('div', { class: 'checkbox-grid' });
-    const modelChecks = {};
-    for (const m of modelOptions) {
-      const id = 'model-' + m.id;
-      const cb = el('input', { type: 'checkbox', id, checked: 'true' });
-      modelChecks[m.id] = { cb, meta: m };
-      const lbl = el('label', { for: id, class: 'check-label' }, m.label);
-      const wrap = el('div', { class: 'check-wrap' });
-      wrap.appendChild(cb);
-      wrap.appendChild(lbl);
-      modelGrid.appendChild(wrap);
-    }
-    form.appendChild(modelGrid);
-
-    const optRow = el('div', { class: 'option-row' });
-    optRow.appendChild(el('label', { class: 'form-label' }, 'Expected output tokens:'));
-    const outputTokens = el('input', { type: 'number', class: 'form-input', value: '500', min: '1' });
-    optRow.appendChild(outputTokens);
-    form.appendChild(optRow);
-
-    const runBtn = el('button', { class: 'btn btn-primary', onclick: runScorer }, 'Calculate Cost');
-    form.appendChild(runBtn);
-
-    const resultsDiv = el('div', { class: 'scorer-results' });
-    container.appendChild(resultsDiv);
-
-    function estimateTokens(text) {
-      // rough estimate: ~4 chars per token
-      return Math.ceil((text || '').length / 4);
-    }
-
-    async function runScorer() {
-      const systemPrompt = sysTA.value;
-      const userMessage = userTA.value;
-      if (!systemPrompt && !userMessage) { toast('Enter at least a system prompt or user message', 'warning'); return; }
-
-      const selectedModels = Object.entries(modelChecks)
-        .filter(([, { cb }]) => cb.checked)
-        .map(([, { meta }]) => meta);
-      if (!selectedModels.length) { toast('Select at least one model', 'warning'); return; }
-
-      const inputTokens = estimateTokens(systemPrompt) + estimateTokens(userMessage);
-      const outTokens = parseInt(outputTokens.value, 10) || 500;
-
-      // Try server-side first, fall back to client-side
-      try {
-        const result = await api('/api/command/score', {
-          method: 'POST',
-          body: JSON.stringify({
-            system_prompt: systemPrompt,
-            user_message: userMessage,
-            models: selectedModels.map(m => m.id),
-            expected_output_tokens: outTokens,
-          }),
-        });
-        renderScorerResults(resultsDiv, result);
-      } catch {
-        // client-side fallback
-        const scores = selectedModels.map(m => ({
-          model: m.label,
-          model_id: m.id,
-          input_tokens: inputTokens,
-          output_tokens: outTokens,
-          total_tokens: inputTokens + outTokens,
-          cost: ((inputTokens / 1000) * m.input + (outTokens / 1000) * m.output),
-        }));
-        scores.sort((a, b) => a.cost - b.cost);
-        renderScorerResults(resultsDiv, { scores, input_tokens: inputTokens, output_tokens: outTokens });
-      }
-    }
-  }
-
-  function renderScorerResults(container, result) {
-    setHTML(container, '');
-    if (!result || !result.scores) {
-      container.appendChild(el('p', {}, 'No results.'));
-      return;
-    }
-
-    const summary = el('div', { class: 'scorer-summary' });
-    summary.appendChild(el('span', {}, `Input tokens: ~${result.input_tokens || 0}`));
-    summary.appendChild(el('span', {}, `Output tokens: ~${result.output_tokens || 0}`));
-    container.appendChild(summary);
-
-    const table = el('table', { class: 'data-table scorer-table' });
-    const thead = el('thead', {});
-    thead.appendChild(el('tr', {},
-      el('th', {}, 'Model'),
-      el('th', {}, 'Input Tokens'),
-      el('th', {}, 'Output Tokens'),
-      el('th', {}, 'Est. Cost'),
-      el('th', {}, 'Cost/1K calls'),
-    ));
-    table.appendChild(thead);
-    const tbody = el('tbody', {});
-    let minCost = Infinity;
-    for (const s of result.scores) minCost = Math.min(minCost, s.cost);
-    for (const s of result.scores) {
-      const row = el('tr', { class: s.cost === minCost ? 'row-highlight' : '' });
-      row.appendChild(el('td', {}, s.model || s.model_id));
-      row.appendChild(el('td', {}, String(s.input_tokens || 0)));
-      row.appendChild(el('td', {}, String(s.output_tokens || 0)));
-      row.appendChild(el('td', {}, '$' + (s.cost || 0).toFixed(6)));
-      row.appendChild(el('td', {}, '$' + ((s.cost || 0) * 1000).toFixed(4)));
-      tbody.appendChild(row);
-    }
-    table.appendChild(tbody);
-    container.appendChild(table);
-  }
-
-  // ── Tab: Run Agent ─────────────────────────────────────────────────────────
-  function renderRunAgent(container) {
-    container.appendChild(el('h2', {}, 'Run Agent'));
-
-    const form = el('div', { class: 'cmd-form' });
-    container.appendChild(form);
-
-    form.appendChild(el('label', { class: 'form-label' }, 'Select Agent'));
-    const agentSelect = el('select', { class: 'form-select' });
-    agentSelect.appendChild(el('option', { value: '' }, '— Select —'));
-    form.appendChild(agentSelect);
-
-    form.appendChild(el('label', { class: 'form-label' }, 'Input (optional)'));
-    const inputTA = el('textarea', { class: 'form-textarea', rows: '4', placeholder: 'Additional input or context…' });
-    form.appendChild(inputTA);
-
-    const runBtn = el('button', { class: 'btn btn-primary', onclick: runAgent }, 'Run');
-    form.appendChild(runBtn);
-
-    const outputDiv = el('div', { class: 'agent-output' });
-    container.appendChild(outputDiv);
-
-    api('/api/agents').then(agents => {
-      for (const a of agents) {
-        agentSelect.appendChild(el('option', { value: a.id }, a.name || a.id));
-      }
-    }).catch(() => {});
-
-    function runAgent() {
-      const agentId = agentSelect.value;
-      if (!agentId) { toast('Select an agent', 'warning'); return; }
-      const input = inputTA.value.trim();
-      setHTML(outputDiv, '<div class="loading-spinner">Running agent…</div>');
-      runBtn.disabled = true;
-
-      const outputContent = el('div', { class: 'stream-output' });
-      setHTML(outputDiv, '');
-      outputDiv.appendChild(el('h3', {}, 'Output'));
-      outputDiv.appendChild(outputContent);
-
-      streamChat(
-        { agent_id: agentId, message: input || 'Run', model: CONFIG.defaultModel },
-        chunk => { outputContent.textContent += chunk; },
-        () => { runBtn.disabled = false; },
-        err => {
-          outputContent.textContent = 'Error: ' + err.message;
-          runBtn.disabled = false;
-        },
+      return (
+        w.recency * recencyScore +
+        w.sourceAuthority * authorityScore +
+        w.crossReference * crossRefScore +
+        w.modelConsensus * consensusScore
       );
-    }
-  }
+    },
 
-  // ── Tab: Batch Run ─────────────────────────────────────────────────────────
-  function renderBatchRun(container) {
-    container.appendChild(el('h2', {}, 'Batch Run'));
-    container.appendChild(el('p', { class: 'tab-desc' }, 'Run multiple agents simultaneously.'));
+    // Synthesize findings into structured intelligence report
+    synthesize(scoredFindings, task) {
+      const topFindings = scoredFindings.slice(0, 10);
+      const avgConfidence = topFindings.reduce((s, f) => s + f.score, 0) / (topFindings.length || 1);
 
-    const form = el('div', { class: 'cmd-form' });
-    container.appendChild(form);
+      return {
+        summary: `Gathered ${scoredFindings.length} unique findings across ${this.sources.length} sources.`,
+        confidence: Math.round(avgConfidence * 100) / 100,
+        keyInsights: topFindings.slice(0, 3).map(f => f.text),
+        topFindings,
+        recommendation: avgConfidence > 0.8
+          ? 'High confidence synthesis. Proceed with findings.'
+          : avgConfidence > 0.6
+            ? 'Moderate confidence. Consider additional verification.'
+            : 'Low confidence. Gather more data before acting.',
+      };
+    },
+  };
 
-    form.appendChild(el('label', { class: 'form-label' }, 'Select Agents'));
-    const agentSelect = el('select', { class: 'form-select', multiple: 'true', size: '6' });
-    form.appendChild(agentSelect);
+  // ── INTELLIGENT TASK ORCHESTRATOR ─────────────
+  // Breaks complex tasks into atomic subtasks,
+  // assigns to optimal agents, and merges results
 
-    form.appendChild(el('label', { class: 'form-label' }, 'Shared Input'));
-    const inputTA = el('textarea', { class: 'form-textarea', rows: '3', placeholder: 'Optional shared input for all agents…' });
-    form.appendChild(inputTA);
+  const TaskOrchestrator = {
+    // Active task registry
+    activeTasks: new Map(),
 
-    const runBtn = el('button', { class: 'btn btn-primary', onclick: runBatch }, 'Run Batch');
-    form.appendChild(runBtn);
+    // Task decomposition templates by category
+    decompositionTemplates: {
+      'seo-audit': [
+        { step: 1, name: 'Technical SEO', query: 'Check site speed, crawlability, schema markup' },
+        { step: 2, name: 'On-Page Analysis', query: 'Analyze title tags, meta descriptions, content quality' },
+        { step: 3, name: 'Backlink Profile', query: 'Evaluate link quality, anchor text distribution' },
+        { step: 4, name: 'Competitor Gap', query: 'Identify keyword and content gaps vs top competitors' },
+        { step: 5, name: 'Action Plan', query: 'Synthesize findings into prioritized action items' },
+      ],
+      'market-research': [
+        { step: 1, name: 'Market Size', query: 'Estimate total addressable market and segments' },
+        { step: 2, name: 'Competitor Analysis', query: 'Map key players, positioning, pricing' },
+        { step: 3, name: 'Customer Research', query: 'Identify ICP pain points and buying triggers' },
+        { step: 4, name: 'Trend Analysis', query: 'Surface emerging trends and disruptions' },
+        { step: 5, name: 'Opportunity Map', query: 'Identify whitespace and differentiation opportunities' },
+      ],
+      'content-strategy': [
+        { step: 1, name: 'Keyword Research', query: 'Find high-value, rankable keyword clusters' },
+        { step: 2, name: 'Content Audit', query: 'Evaluate existing content performance and gaps' },
+        { step: 3, name: 'Competitor Content', query: 'Analyze top-performing competitor content' },
+        { step: 4, name: 'Topic Clusters', query: 'Build topic cluster architecture' },
+        { step: 5, name: 'Editorial Calendar', query: 'Generate 90-day content production plan' },
+      ],
+    },
 
-    const resultsDiv = el('div', { class: 'batch-results' });
-    container.appendChild(resultsDiv);
+    // Submit complex task for orchestrated execution
+    async submit(taskDefinition) {
+      const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const task = {
+        id: taskId,
+        definition: taskDefinition,
+        status: 'queued',
+        progress: 0,
+        subtasks: [],
+        results: [],
+        startTime: Date.now(),
+        estimatedDuration: 0,
+      };
 
-    api('/api/agents').then(agents => {
-      for (const a of agents.filter(a => a.active)) {
-        agentSelect.appendChild(el('option', { value: a.id }, a.name || a.id));
-      }
-    }).catch(() => {});
+      this.activeTasks.set(taskId, task);
 
-    async function runBatch() {
-      const selectedIds = [...agentSelect.options]
-        .filter(o => o.selected).map(o => o.value);
-      if (!selectedIds.length) { toast('Select at least one agent', 'warning'); return; }
-      const input = inputTA.value.trim();
+      // Decompose into subtasks
+      const subtasks = this.decompose(taskDefinition);
+      task.subtasks = subtasks;
+      task.estimatedDuration = subtasks.reduce((s, st) => s + st.estimatedMs, 0);
+      task.status = 'running';
 
-      setHTML(resultsDiv, '<div class="loading-spinner">Running batch…</div>');
-      runBtn.disabled = true;
-
-      try {
-        const result = await api('/api/command/batch', {
-          method: 'POST',
-          body: JSON.stringify({ agent_ids: selectedIds, input: input || 'Run' }),
-        });
-        setHTML(resultsDiv, '');
-        if (!result.results) { resultsDiv.appendChild(el('p', {}, 'No results returned.')); return; }
-        for (const r of result.results) {
-          const card = el('div', { class: `batch-result-card ${r.error ? 'result-error' : 'result-success'}` });
-          card.appendChild(el('div', { class: 'batch-agent-name' }, r.agent_name || r.agent_id));
-          if (r.error) {
-            card.appendChild(el('div', { class: 'error-msg' }, r.error));
-          } else {
-            const pre = el('pre', { class: 'batch-output' });
-            pre.textContent = r.output || '';
-            card.appendChild(pre);
-          }
-          resultsDiv.appendChild(card);
-        }
-      } catch (e) {
-        setHTML(resultsDiv, `<p class="error-msg">Error: ${e.message}</p>`);
-      } finally {
-        runBtn.disabled = false;
-      }
-    }
-  }
-
-  // ── Tab: Logs ──────────────────────────────────────────────────────────────
-  function renderLogs(container) {
-    container.appendChild(el('h2', {}, 'Execution Logs'));
-
-    const toolbar = el('div', { class: 'toolbar' });
-    const refreshBtn = el('button', { class: 'btn', onclick: loadLogs }, 'Refresh');
-    const clearBtn = el('button', { class: 'btn btn-danger', onclick: clearLogs }, 'Clear Logs');
-    toolbar.appendChild(refreshBtn);
-    toolbar.appendChild(clearBtn);
-    container.appendChild(toolbar);
-
-    const logsDiv = el('div', { class: 'logs-container' });
-    container.appendChild(logsDiv);
-
-    loadLogs();
-
-    async function loadLogs() {
-      setHTML(logsDiv, '<div class="loading-spinner">Loading…</div>');
-      try {
-        const logs = await api('/api/logs');
-        setHTML(logsDiv, '');
-        if (!logs || !logs.length) {
-          logsDiv.appendChild(el('p', { class: 'empty-msg' }, 'No logs yet.'));
-          return;
-        }
-        for (const log of logs.slice().reverse()) {
-          const entry = el('div', { class: `log-entry log-${log.level || 'info'}` });
-          entry.appendChild(el('span', { class: 'log-time' }, log.timestamp || ''));
-          entry.appendChild(el('span', { class: 'log-level' }, (log.level || 'info').toUpperCase()));
-          entry.appendChild(el('span', { class: 'log-msg' }, log.message || ''));
-          logsDiv.appendChild(entry);
-        }
-      } catch (e) {
-        logsDiv.textContent = 'Error: ' + e.message;
-      }
-    }
-
-    async function clearLogs() {
-      if (!confirm('Clear all logs?')) return;
-      try {
-        await api('/api/logs', { method: 'DELETE' });
-        toast('Logs cleared', 'success');
-        loadLogs();
-      } catch (e) {
-        toast('Error: ' + e.message, 'error');
-      }
-    }
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // PAGE: AI SEARCH BIBLE
-  // ─────────────────────────────────────────────────────────────────────────
-  route('#/ai-search', function () {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/ai-search'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      const header = el('div', { class: 'page-header' });
-      header.appendChild(el('h1', {}, 'AI Search Bible'));
-      header.appendChild(el('p', { class: 'page-subtitle' },
-        'Browse the 45 croutons of AI search doctrine — core principles for winning AI-powered search surfaces.'
-      ));
-      main.appendChild(header);
-
-      // Filter row
-      const filterRow = el('div', { class: 'toolbar' });
-      const searchInput = el('input', { type: 'text', class: 'form-input', placeholder: 'Search croutons…' });
-      const typeFilter = el('select', { class: 'form-select' });
-      typeFilter.appendChild(el('option', { value: '' }, 'All Types'));
-      for (const t of ['doctrine', 'fact', 'how-to', 'example', 'comparison', 'definition']) {
-        typeFilter.appendChild(el('option', { value: t }, t));
-      }
-      filterRow.appendChild(searchInput);
-      filterRow.appendChild(typeFilter);
-      main.appendChild(filterRow);
-
-      const croutonGrid = el('div', { class: 'crouton-grid' });
-      main.appendChild(croutonGrid);
-
-      let allCroutons = [];
-
-      function renderCroutons(croutons) {
-        setHTML(croutonGrid, '');
-        if (!croutons.length) {
-          croutonGrid.appendChild(el('p', { class: 'empty-msg' }, 'No croutons match your filter.'));
-          return;
-        }
-        for (const c of croutons) {
-          const card = el('div', { class: `crouton-card crouton-type-${c.type || 'doctrine'}` });
-          const cardHeader = el('div', { class: 'crouton-card-header' });
-          cardHeader.appendChild(el('span', { class: 'crouton-id' }, c.id || ''));
-          cardHeader.appendChild(el('span', { class: `crouton-type-badge type-${c.type || 'doctrine'}` }, c.type || 'doctrine'));
-          card.appendChild(cardHeader);
-          if (c.title) card.appendChild(el('div', { class: 'crouton-title' }, c.title));
-          if (c.content) card.appendChild(el('div', { class: 'crouton-content' }, c.content));
-          if (c.tags && c.tags.length) {
-            const tagRow = el('div', { class: 'crouton-tags' });
-            for (const tag of c.tags) tagRow.appendChild(el('span', { class: 'tag' }, tag));
-            card.appendChild(tagRow);
-          }
-          croutonGrid.appendChild(card);
-        }
-      }
-
-      // Load from knowledge API
-      api('/api/knowledge/ai-search-bible').then(data => {
-        if (Array.isArray(data)) {
-          allCroutons = data;
-        } else if (data && data.croutons) {
-          allCroutons = data.croutons;
-        } else if (data && data.entries) {
-          allCroutons = data.entries;
-        }
-        renderCroutons(allCroutons);
-      }).catch(() => {
-        // fallback: try generic knowledge search
-        api('/api/knowledge?q=ai-search-bible').then(data => {
-          allCroutons = Array.isArray(data) ? data : (data.entries || []);
-          renderCroutons(allCroutons);
-        }).catch(e => {
-          croutonGrid.appendChild(el('p', { class: 'error-msg' }, 'Error loading croutons: ' + e.message));
-        });
+      // Execute subtasks
+      this.executeSubtasks(taskId, subtasks).catch(err => {
+        task.status = 'failed';
+        task.error = err.message;
       });
 
-      function filterCroutons() {
-        const q = searchInput.value.toLowerCase();
-        const type = typeFilter.value;
-        renderCroutons(allCroutons.filter(c => {
-          const matchQ = !q ||
-            (c.title || '').toLowerCase().includes(q) ||
-            (c.content || '').toLowerCase().includes(q) ||
-            (c.tags || []).some(t => t.toLowerCase().includes(q));
-          const matchType = !type || c.type === type;
-          return matchQ && matchType;
+      return taskId;
+    },
+
+    // Decompose task into subtasks based on category or custom definition
+    decompose(taskDefinition) {
+      const template = this.decompositionTemplates[taskDefinition.category];
+      if (template) {
+        return template.map(t => ({
+          ...t,
+          id: `st_${t.step}`,
+          status: 'pending',
+          estimatedMs: 3000 + Math.random() * 2000,
         }));
       }
 
-      searchInput.addEventListener('input', filterCroutons);
-      typeFilter.addEventListener('change', filterCroutons);
-    });
-  });
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // MODAL HELPER
-  // ─────────────────────────────────────────────────────────────────────────
-  function buildModal(title, content) {
-    const overlay = el('div', { class: 'modal-overlay', onclick: e => { if (e.target === overlay) overlay.remove(); } });
-    const box = el('div', { class: 'modal-box' });
-    box.appendChild(el('h2', {}, title));
-    const body = el('div', { class: 'modal-body' });
-    body.textContent = content;
-    box.appendChild(body);
-    const closeBtn = el('button', { class: 'btn', onclick: () => overlay.remove() }, 'Close');
-    box.appendChild(closeBtn);
-    overlay.appendChild(box);
-    return overlay;
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // UTIL
-  // ─────────────────────────────────────────────────────────────────────────
-  function formatNum(n) {
-    if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + 'M';
-    if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
-    return String(n);
-  }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // 404
-  // ─────────────────────────────────────────────────────────────────────────
-  function renderNotFound() {
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav(''));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-      main.appendChild(el('h1', {}, '404 — Page Not Found'));
-      main.appendChild(el('a', { href: '#/' }, '← Back to Dashboard'));
-    });
-  }
-
-  route('#/404', renderNotFound);
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // BOOT
-  // ─────────────────────────────────────────────────────────────────────────
-  function init() {
-    dispatch();
-  }
-
-  // ── WIZARD page alias
-  route('#/wizard', function () {
-    const params = new URLSearchParams(window.location.hash.split('?')[1] || '');
-    const editId = params.get('edit');
-
-    renderMain(wrapper => {
-      wrapper.appendChild(buildNav('#/agents'));
-      const main = el('main', { class: 'main-content' });
-      wrapper.appendChild(main);
-
-      main.appendChild(el('h1', {}, editId ? 'Edit Agent' : 'New Agent'));
-
-      const form = el('form', { class: 'agent-form' });
-      main.appendChild(form);
-
-      const fields = [
-        { name: 'name', label: 'Agent Name', type: 'text', placeholder: 'My Agent', required: true },
-        { name: 'model', label: 'Model', type: 'select', options: ['gpt-4o-mini', 'gpt-4o', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
-        { name: 'temperature', label: 'Temperature', type: 'number', placeholder: '0.7', step: '0.1', min: '0', max: '2' },
-        { name: 'max_tokens', label: 'Max Tokens', type: 'number', placeholder: '2048' },
-        { name: 'system_prompt', label: 'System Prompt', type: 'textarea', rows: '5' },
-        { name: 'schedule', label: 'Schedule', type: 'select', options: ['manual', 'hourly', 'daily', 'weekly'] },
+      // Custom decomposition for ad-hoc tasks
+      return [
+        {
+          id: 'st_1',
+          step: 1,
+          name: 'Research',
+          query: taskDefinition.query,
+          status: 'pending',
+          estimatedMs: 5000,
+        },
+        {
+          id: 'st_2',
+          step: 2,
+          name: 'Analysis',
+          query: `Analyze: ${taskDefinition.query}`,
+          status: 'pending',
+          estimatedMs: 4000,
+        },
+        {
+          id: 'st_3',
+          step: 3,
+          name: 'Synthesis',
+          query: `Synthesize findings for: ${taskDefinition.query}`,
+          status: 'pending',
+          estimatedMs: 3000,
+        },
       ];
+    },
 
-      const buildForm = (existing = {}) => {
-        setHTML(form, '');
-        for (const f of fields) {
-          const group = el('div', { class: 'form-group' });
-          group.appendChild(el('label', { class: 'form-label' }, f.label));
-          let input;
-          if (f.type === 'select') {
-            input = el('select', { name: f.name, class: 'form-select' });
-            for (const opt of f.options) {
-              const o = el('option', { value: opt }, opt);
-              if (existing[f.name] === opt) o.selected = true;
-              input.appendChild(o);
-            }
-          } else if (f.type === 'textarea') {
-            input = el('textarea', { name: f.name, class: 'form-textarea', rows: f.rows || '3', placeholder: f.placeholder || '' });
-            input.value = existing[f.name] || '';
-          } else {
-            const attrs = { name: f.name, type: f.type, class: 'form-input', placeholder: f.placeholder || '' };
-            if (f.step) attrs.step = f.step;
-            if (f.min) attrs.min = f.min;
-            if (f.max) attrs.max = f.max;
-            if (f.required) attrs.required = 'true';
-            input = el('input', attrs);
-            input.value = existing[f.name] || '';
-          }
-          group.appendChild(input);
-          form.appendChild(group);
-        }
+    // Execute subtasks with dependency management
+    async executeSubtasks(taskId, subtasks) {
+      const task = this.activeTasks.get(taskId);
+      if (!task) return;
 
-        // Knowledge base multi-select
-        const kGroup = el('div', { class: 'form-group' });
-        kGroup.appendChild(el('label', { class: 'form-label' }, 'Knowledge Bases'));
-        const kSelect = el('select', { name: 'knowledge_ids', class: 'form-select', multiple: 'true', size: '4' });
-        api('/api/knowledge').then(kData => {
-          const entries = Array.isArray(kData) ? kData : (kData.entries || []);
-          for (const k of entries) {
-            const o = el('option', { value: k.id }, k.title || k.id);
-            if ((existing.knowledge_ids || []).includes(k.id)) o.selected = true;
-            kSelect.appendChild(o);
-          }
-        }).catch(() => {});
-        kGroup.appendChild(kSelect);
-        form.appendChild(kGroup);
+      for (const subtask of subtasks) {
+        subtask.status = 'running';
+        subtask.startTime = Date.now();
+        this.broadcastProgress(taskId);
 
-        // Rules
-        const rGroup = el('div', { class: 'form-group' });
-        rGroup.appendChild(el('label', { class: 'form-label' }, 'Rules (one per line)'));
-        const rTA = el('textarea', { name: 'rules', class: 'form-textarea', rows: '3', placeholder: 'Be concise\nAlways cite sources' });
-        rTA.value = (existing.rules || []).join('\n');
-        rGroup.appendChild(rTA);
-        form.appendChild(rGroup);
-
-        const active = el('div', { class: 'form-group form-check' });
-        const activeInput = el('input', { type: 'checkbox', name: 'active', id: 'active-check' });
-        if (existing.active !== false) activeInput.checked = true;
-        active.appendChild(activeInput);
-        active.appendChild(el('label', { for: 'active-check' }, 'Active'));
-        form.appendChild(active);
-
-        const btnRow = el('div', { class: 'form-actions' });
-        const saveBtn = el('button', { type: 'button', class: 'btn btn-primary', onclick: () => saveAgent(existing.id) }, editId ? 'Update Agent' : 'Create Agent');
-        const cancelBtn = el('button', { type: 'button', class: 'btn', onclick: () => navigate('#/agents') }, 'Cancel');
-        btnRow.appendChild(saveBtn);
-        btnRow.appendChild(cancelBtn);
-        form.appendChild(btnRow);
-      };
-
-      if (editId) {
-        api(`/api/agents/${editId}`).then(agent => buildForm(agent)).catch(() => buildForm({}));
-      } else {
-        buildForm({});
-      }
-
-      async function saveAgent(existingId) {
-        const data = { rules: [], knowledge_ids: [] };
-        for (const input of $$('input, select, textarea', form)) {
-          if (!input.name) continue;
-          if (input.type === 'checkbox') { data[input.name] = input.checked; }
-          else if (input.name === 'rules') { data.rules = input.value.split('\n').map(r => r.trim()).filter(Boolean); }
-          else if (input.name === 'knowledge_ids') {
-            data.knowledge_ids = [...input.options].filter(o => o.selected).map(o => o.value);
-          }
-          else { data[input.name] = input.value; }
-        }
         try {
-          if (existingId) {
-            await api(`/api/agents/${existingId}`, { method: 'PUT', body: JSON.stringify(data) });
-            toast('Agent updated', 'success');
-          } else {
-            await api('/api/agents', { method: 'POST', body: JSON.stringify(data) });
-            toast('Agent created', 'success');
-          }
-          navigate('#/agents');
-        } catch (e) { toast('Error: ' + e.message, 'error'); }
+          // Execute subtask via FanOut engine
+          const result = await FanOutEngine.query({
+            query: subtask.query,
+            step: subtask.step,
+            taskId,
+          });
+
+          subtask.status = 'completed';
+          subtask.result = result;
+          subtask.duration = Date.now() - subtask.startTime;
+          task.results.push({ subtask: subtask.name, ...result.synthesis });
+          task.progress = Math.round((subtasks.filter(s => s.status === 'completed').length / subtasks.length) * 100);
+
+        } catch (err) {
+          subtask.status = 'failed';
+          subtask.error = err.message;
+        }
+
+        this.broadcastProgress(taskId);
       }
+
+      task.status = 'completed';
+      task.duration = Date.now() - task.startTime;
+      task.finalSynthesis = this.mergeSyntheses(task.results);
+      this.broadcastProgress(taskId);
+    },
+
+    // Merge multiple subtask syntheses into final report
+    mergeSyntheses(results) {
+      const allInsights = results.flatMap(r => r.keyInsights || []);
+      const avgConfidence = results.reduce((s, r) => s + (r.confidence || 0), 0) / (results.length || 1);
+
+      return {
+        totalSubtasks: results.length,
+        completedSubtasks: results.filter(r => r.summary).length,
+        overallConfidence: Math.round(avgConfidence * 100) / 100,
+        consolidatedInsights: [...new Set(allInsights)].slice(0, 10),
+        executiveSummary: `Completed ${results.length} intelligence subtasks with ${Math.round(avgConfidence * 100)}% average confidence.`,
+      };
+    },
+
+    // Broadcast progress updates to subscribers
+    broadcastProgress(taskId) {
+      const task = this.activeTasks.get(taskId);
+      if (!task) return;
+
+      window.dispatchEvent(new CustomEvent('orchestrator:progress', {
+        detail: { taskId, task }
+      }));
+    },
+
+    // Get task status
+    getTask(taskId) {
+      return this.activeTasks.get(taskId);
+    },
+
+    // List all active tasks
+    listTasks() {
+      return [...this.activeTasks.values()];
+    },
+  };
+
+  // ── INIT ───────────────────────────────────────
+  async function init() {
+    // Load config first
+    try {
+      const config = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
+      SUPABASE_URL = config.supabase_url || '';
+      SUPABASE_ANON_KEY = config.supabase_anon_key || '';
+      STRIPE_PK = config.stripe_pk || '';
+    } catch (e) {
+      console.warn('Config load failed, using defaults');
+    }
+
+    // Initialize Supabase
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } else {
+      // Fallback: create a minimal supabase-like interface
+      supabase = {
+        auth: {
+          signInWithPassword: async ({ email, password }) => {
+            const data = await apiFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }).catch(e => { throw e; });
+            currentSession = data.session || data;
+            if (currentSession?.access_token) {
+              navigate('#/dashboard');
+            }
+            return { data, error: null };
+          },
+          signUp: async ({ email, password, options }) => {
+            const data = await apiFetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, ...options?.data }) }).catch(e => { throw e; });
+            return { data, error: null };
+          },
+          resetPasswordForEmail: async (email) => {
+            await apiFetch('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email }) }).catch(e => { throw e; });
+            return { error: null };
+          },
+          signOut: async () => {
+            await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+            currentSession = null;
+            return { error: null };
+          },
+          getSession: async () => {
+            const data = await apiFetch('/api/auth/session').catch(() => null);
+            if (data?.session) currentSession = data.session;
+            return { data: { session: currentSession }, error: null };
+          },
+          onAuthStateChange: (cb) => {
+            // Polling fallback for non-Supabase auth
+            const poll = setInterval(async () => {
+              const data = await apiFetch('/api/auth/session').catch(() => null);
+              if (data?.session && !currentSession) {
+                currentSession = data.session;
+                cb('SIGNED_IN', currentSession);
+              } else if (!data?.session && currentSession) {
+                currentSession = null;
+                cb('SIGNED_OUT', null);
+              }
+            }, 5000);
+            return { data: { subscription: { unsubscribe: () => clearInterval(poll) } } };
+          },
+          updateUser: async ({ password }) => {
+            await apiFetch('/api/auth/update-password', { method: 'POST', body: JSON.stringify({ password }) }).catch(e => { throw e; });
+            return { error: null };
+          },
+        },
+      };
+    }
+
+    // Set up auth state listener
+    supabase.auth.onAuthStateChange((event, session) => {
+      currentSession = session;
+      if (event === 'SIGNED_OUT') {
+        cachedProfile = null;
+        navigate('#/login');
+      } else if (event === 'SIGNED_IN') {
+        navigate('#/dashboard');
+      }
+      render();
     });
-  });
 
-  // Default wizard data
-  const defaultWizardData = { name: '', system_prompt: '', active: true, knowledge_ids: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+    // Try to restore existing session
+    const { data } = await supabase.auth.getSession();
+    currentSession = data?.session || null;
 
-  function navigate(hash) {
-    window.location.hash = hash;
+    // Expose public API
+    window.NC = {
+      render,
+      navigate,
+      toggleSidebar() {
+        sidebarOpen = !sidebarOpen;
+        document.getElementById('sidebar')?.classList.toggle('open', sidebarOpen);
+      },
+      prefillTemplate(id) {
+        wizardData.template_id = id;
+      },
+      FanOutEngine,
+      TaskOrchestrator,
+    };
+
+    // Handle hash changes for routing
+    window.addEventListener('hashchange', render);
+
+    // Initial render
+    render();
   }
 
   // ── BOOT ───────────────────────────────────
