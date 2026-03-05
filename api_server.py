@@ -259,7 +259,7 @@ TEMPLATES = [
     {
         "id": "seo",
         "name": "SEO Analyst",
-        "icon": "🔍",
+        "icon": "search",
         "description": "Audits websites, tracks rankings, and recommends SEO optimizations",
         "tags": ["seo", "marketing", "analytics"],
         "default_goals": ["Analyze on-page SEO", "Identify keyword opportunities", "Monitor backlinks"],
@@ -273,7 +273,7 @@ TEMPLATES = [
     {
         "id": "social",
         "name": "Social Media Strategist",
-        "icon": "📱",
+        "icon": "share-2",
         "description": "Monitors engagement, suggests content, and analyzes social trends",
         "tags": ["social", "marketing", "content"],
         "default_goals": ["Monitor brand mentions", "Suggest viral content ideas", "Analyze engagement"],
@@ -287,7 +287,7 @@ TEMPLATES = [
     {
         "id": "sales",
         "name": "Sales Assistant",
-        "icon": "💼",
+        "icon": "briefcase",
         "description": "Qualifies leads, drafts outreach emails, and tracks pipeline",
         "tags": ["sales", "crm", "outreach"],
         "default_goals": ["Qualify inbound leads", "Draft personalized outreach", "Track deal stage"],
@@ -301,7 +301,7 @@ TEMPLATES = [
     {
         "id": "support",
         "name": "Customer Support Agent",
-        "icon": "🎧",
+        "icon": "headphones",
         "description": "Triages support tickets and suggests resolutions",
         "tags": ["support", "customer success", "help desk"],
         "default_goals": ["Triage incoming tickets", "Suggest resolutions", "Escalate critical issues"],
@@ -315,7 +315,7 @@ TEMPLATES = [
     {
         "id": "content",
         "name": "Content Strategist",
-        "icon": "✍️",
+        "icon": "pen-tool",
         "description": "Generates content ideas, drafts articles, and manages editorial calendar",
         "tags": ["content", "writing", "editorial"],
         "default_goals": ["Generate content ideas", "Draft long-form articles", "Manage content calendar"],
@@ -329,7 +329,7 @@ TEMPLATES = [
     {
         "id": "analytics",
         "name": "Data Analyst",
-        "icon": "📊",
+        "icon": "bar-chart-3",
         "description": "Tracks metrics, generates reports, and identifies anomalies",
         "tags": ["analytics", "data", "reporting"],
         "default_goals": ["Track KPIs", "Generate weekly reports", "Detect metric anomalies"],
@@ -343,7 +343,7 @@ TEMPLATES = [
     {
         "id": "custom",
         "name": "Custom Agent",
-        "icon": "⚙️",
+        "icon": "settings",
         "description": "Fully customizable agent with your own system prompt and goals",
         "tags": ["custom", "flexible"],
         "default_goals": ["Define your own goals"],
