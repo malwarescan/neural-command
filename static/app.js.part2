@@ -1,0 +1,845 @@
+
+        toast(`${serviceName} connected`, 'success');
+        overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      });
+    }
+  }
+
+  function startOAuthFlow(service, name) {
+    // Open OAuth popup
+    const width = 600, height = 700;
+    const left = window.screenX + (window.outerWidth - width) / 2;
+    const top = window.screenY + (window.outerHeight - height) / 2;
+    const popup = window.open(
+      `/api/oauth/${service}`,
+      `oauth_${service}`,
+      `width=${width},height=${height},left=${left},top=${top}`
+    );
+
+    const checkClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkClosed);
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      }
+    }, 500);
+  }
+
+  function showApiKeyOverlay(service, name, fields) {
+    const overlay = el('div', { className: 'modal-overlay' });
+    overlay.innerHTML = `
+      <div class="modal">
+        <div class="modal-header">
+          <h3 class="modal-title">Connect ${escapeHtml(name)}</h3>
+          <button class="modal-close" id="modal-close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          ${fields.map(f => `
+            <div class="form-group">
+              <label class="form-label">${escapeHtml(f.label)}</label>
+              <input type="${f.type || 'text'}" class="form-input" id="field-${f.id}" placeholder="${escapeHtml(f.placeholder || '')}">
+            </div>
+          `).join('')}
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="modal-cancel-btn">Cancel</button>
+          <button class="btn btn-primary" id="modal-save-btn">Connect</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+
+    document.getElementById('modal-close-btn')?.addEventListener('click', () => overlay.remove());
+    document.getElementById('modal-cancel-btn')?.addEventListener('click', () => overlay.remove());
+    document.getElementById('modal-save-btn')?.addEventListener('click', async () => {
+      const credentials = {};
+      for (const f of fields) {
+        credentials[f.id] = document.getElementById(`field-${f.id}`)?.value.trim() || '';
+      }
+      const serviceId = service;
+      const serviceName = name;
+      try {
+        await apiFetch('/api/connections/apikey', {
+          method: 'POST',
+          body: JSON.stringify({ service: serviceId, ...credentials }),
+        });
+        toast(`${serviceName} connected`, 'success');
+        overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main) renderConnections(main);
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  }
+
+  // ── BILLING VIEW ───────────────────────────
+  async function renderBilling(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/billing');
+      const plan = data.plan || 'free';
+      const plans = [
+        {
+          id: 'free',
+          name: 'Free',
+          price: '$0',
+          period: '/month',
+          features: ['100 API calls/month', '3 agents', 'Community support'],
+          cta: 'Current Plan',
+          highlight: false,
+        },
+        {
+          id: 'pro',
+          name: 'Pro',
+          price: '$29',
+          period: '/month',
+          features: ['5,000 API calls/month', 'Unlimited agents', 'Priority support', 'Advanced analytics', 'Webhooks'],
+          cta: 'Upgrade to Pro',
+          highlight: true,
+        },
+        {
+          id: 'enterprise',
+          name: 'Enterprise',
+          price: 'Custom',
+          period: '',
+          features: ['Unlimited API calls', 'Unlimited agents', 'Dedicated support', 'SLA', 'Custom integrations'],
+          cta: 'Contact Sales',
+          highlight: false,
+        },
+      ];
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Billing</h1>
+          <p class="page-subtitle">Manage your subscription and usage</p>
+        </div>
+
+        <div class="kpi-grid" style="margin-bottom:32px">
+          <div class="kpi-card">
+            <div class="kpi-label">Current Plan</div>
+            <div class="kpi-value" style="text-transform:capitalize">${plan}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">API Calls Used</div>
+            <div class="kpi-value">${data.api_calls_this_month} / ${data.api_calls_limit}</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Period End</div>
+            <div class="kpi-value" style="font-size:16px">${data.current_period_end ? formatDate(data.current_period_end) : 'N/A'}</div>
+          </div>
+        </div>
+
+        <div class="plans-grid">
+          ${plans.map(p => `
+            <div class="plan-card ${p.highlight ? 'plan-card-highlight' : ''} ${plan === p.id ? 'plan-card-current' : ''}">
+              ${p.highlight ? '<div class="plan-badge">Most Popular</div>' : ''}
+              <div class="plan-name">${p.name}</div>
+              <div class="plan-price">${p.price}<span class="plan-period">${p.period}</span></div>
+              <ul class="plan-features">
+                ${p.features.map(f => `<li><i data-lucide="check" style="width:14px;height:14px;color:#10b981"></i>${escapeHtml(f)}</li>`).join('')}
+              </ul>
+              <button class="btn ${p.highlight ? 'btn-primary' : 'btn-ghost'} plan-cta" data-plan="${p.id}"
+                ${plan === p.id ? 'disabled' : ''}>
+                ${plan === p.id ? '✓ ' + p.cta : p.cta}
+              </button>
+            </div>
+          `).join('')}
+        </div>`;
+
+      lucide.createIcons();
+
+      // Bind plan CTAs
+      container.querySelectorAll('.plan-cta').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const targetPlan = btn.dataset.plan;
+          if (targetPlan === plan) return;
+          if (targetPlan === 'enterprise') {
+            toast('Contact us at sales@example.com', 'info');
+            return;
+          }
+          btn.disabled = true;
+          btn.textContent = 'Processing...';
+          try {
+            const result = await apiFetch('/api/billing/checkout', {
+              method: 'POST',
+              body: JSON.stringify({ plan: targetPlan }),
+            });
+            if (result.url) {
+              window.location.href = result.url;
+            } else {
+              toast('Checkout initiated', 'info');
+            }
+          } catch (err) {
+            toast(err.message, 'error');
+            btn.disabled = false;
+            btn.textContent = targetPlan === 'pro' ? 'Upgrade to Pro' : 'Downgrade to Free';
+          }
+        });
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load billing</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── SETTINGS VIEW ─────────────────────────
+  async function renderSettings(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const profile = await apiFetch('/api/profile');
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Settings</h1>
+          <p class="page-subtitle">Manage your account</p>
+        </div>
+
+        <div class="settings-grid">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Profile</h3></div>
+            <div class="form-group">
+              <label class="form-label">Display Name</label>
+              <input type="text" class="form-input" id="s-name" value="${escapeHtml(profile.display_name || '')}">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" class="form-input" id="s-email" value="${escapeHtml(profile.email || '')}" disabled>
+            </div>
+            <button class="btn btn-primary" id="save-profile-btn">Save Changes</button>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Password</h3></div>
+            <div class="form-group">
+              <label class="form-label">New Password</label>
+              <input type="password" class="form-input" id="s-pass" placeholder="Min. 6 characters" minlength="6">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Confirm Password</label>
+              <input type="password" class="form-input" id="s-pass2" placeholder="Repeat password">
+            </div>
+            <button class="btn btn-primary" id="save-pass-btn">Update Password</button>
+          </div>
+        </div>
+
+        <div class="card" style="margin-top:16px;border:1px solid rgba(239,68,68,0.3)">
+          <div class="card-header"><h3 class="card-title" style="color:#ef4444">Danger Zone</h3></div>
+          <p class="text-sm text-muted">Deleting your account is permanent. All agents, runs, and connections will be removed.</p>
+          <button class="btn btn-danger" id="delete-account-btn" style="margin-top:12px">Delete Account</button>
+        </div>`;
+
+      document.getElementById('save-profile-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('save-profile-btn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+          const name = document.getElementById('s-name').value.trim();
+          await apiFetch('/api/profile', { method: 'PUT', body: JSON.stringify({ display_name: name }) });
+          cachedProfile = null;
+          toast('Profile updated', 'success');
+          await ensureProfile();
+        } catch (err) { toast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = 'Save Changes'; }
+      });
+
+      document.getElementById('save-pass-btn')?.addEventListener('click', async () => {
+        const btn = document.getElementById('save-pass-btn');
+        const pass = document.getElementById('s-pass').value;
+        const pass2 = document.getElementById('s-pass2').value;
+        if (!pass) { toast('Enter a new password', 'error'); return; }
+        if (pass !== pass2) { toast('Passwords do not match', 'error'); return; }
+        btn.disabled = true;
+        btn.textContent = 'Updating...';
+        try {
+          const { error } = await supabase.auth.updateUser({ password: pass });
+          if (error) throw error;
+          toast('Password updated', 'success');
+          document.getElementById('s-pass').value = '';
+          document.getElementById('s-pass2').value = '';
+        } catch (err) { toast(err.message, 'error'); }
+        finally { btn.disabled = false; btn.textContent = 'Update Password'; }
+      });
+
+      document.getElementById('delete-account-btn')?.addEventListener('click', async () => {
+        if (!confirm('Are you sure? This cannot be undone.')) return;
+        if (!confirm('This will delete ALL your agents, runs, and connections. Continue?')) return;
+        try {
+          await apiFetch('/api/profile', { method: 'DELETE' });
+          await supabase.auth.signOut();
+          currentSession = null;
+          cachedProfile = null;
+          navigate('#/login');
+        } catch (err) { toast(err.message, 'error'); }
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3>Failed to load settings</h3><p>${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── FAN-OUT INTELLIGENCE ENGINE ────────────────
+  // Multi-model, multi-source intelligence gathering with
+  // deduplication, cross-referencing, and confidence scoring
+
+  const FanOutEngine = {
+    // Configuration for parallel query fanout
+    config: {
+      maxConcurrent: 6,
+      timeoutMs: 30000,
+      deduplicationThreshold: 0.85,
+      confidenceWeights: {
+        recency: 0.3,
+        sourceAuthority: 0.3,
+        crossReference: 0.25,
+        modelConsensus: 0.15,
+      },
+    },
+
+    // Source registry with capability metadata
+    sources: [
+      {
+        id: 'perplexity',
+        name: 'Perplexity AI',
+        type: 'search-ai',
+        capabilities: ['real-time', 'citations', 'synthesis'],
+        reliability: 0.92,
+        latencyMs: 2000,
+      },
+      {
+        id: 'openai-gpt4',
+        name: 'GPT-4o',
+        type: 'llm',
+        capabilities: ['reasoning', 'synthesis', 'code'],
+        reliability: 0.95,
+        latencyMs: 3000,
+      },
+      {
+        id: 'anthropic-claude',
+        name: 'Claude 3.5',
+        type: 'llm',
+        capabilities: ['reasoning', 'analysis', 'long-context'],
+        reliability: 0.94,
+        latencyMs: 2500,
+      },
+      {
+        id: 'google-search',
+        name: 'Google Search',
+        type: 'search',
+        capabilities: ['real-time', 'broad-coverage'],
+        reliability: 0.88,
+        latencyMs: 500,
+      },
+      {
+        id: 'internal-kb',
+        name: 'Internal Knowledge Base',
+        type: 'knowledge-base',
+        capabilities: ['domain-specific', 'authoritative'],
+        reliability: 0.97,
+        latencyMs: 100,
+      },
+    ],
+
+    // Execute parallel fan-out query
+    async query(task, context = {}) {
+      const startTime = Date.now();
+      const queryId = `fo_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+
+      // Generate specialized sub-queries for each source
+      const subQueries = this.generateSubQueries(task, context);
+
+      // Execute in parallel with concurrency limit
+      const results = await this.executeParallel(subQueries, context);
+
+      // Deduplicate and cross-reference results
+      const deduplicated = this.deduplicateResults(results);
+
+      // Score and rank by confidence
+      const scored = this.scoreResults(deduplicated, context);
+
+      // Synthesize final intelligence report
+      const synthesis = this.synthesize(scored, task);
+
+      return {
+        queryId,
+        task,
+        duration: Date.now() - startTime,
+        sourcesQueried: results.length,
+        uniqueFindings: deduplicated.length,
+        synthesis,
+        results: scored,
+        metadata: {
+          timestamp: new Date().toISOString(),
+          context,
+          config: this.config,
+        },
+      };
+    },
+
+    // Generate optimized sub-queries per source type
+    generateSubQueries(task, context) {
+      return this.sources.map(source => ({
+        source,
+        query: this.adaptQueryForSource(task, source, context),
+        priority: source.reliability,
+        timeout: Math.min(source.latencyMs * 3, this.config.timeoutMs),
+      }));
+    },
+
+    // Adapt query based on source capabilities
+    adaptQueryForSource(task, source, context) {
+      const baseQuery = task.query || task;
+      switch (source.type) {
+        case 'search-ai':
+          return `[Real-time search] ${baseQuery}. Provide citations and current data as of ${new Date().toDateString()}.`;
+        case 'llm':
+          return `[Deep analysis] ${baseQuery}. Context: ${JSON.stringify(context)}. Provide structured analysis with confidence levels.`;
+        case 'search':
+          return baseQuery;
+        case 'knowledge-base':
+          return `[KB lookup] ${baseQuery}. Return relevant internal documents and policies.`;
+        default:
+          return baseQuery;
+      }
+    },
+
+    // Execute queries in parallel with concurrency control
+    async executeParallel(subQueries, context) {
+      const results = [];
+      const batches = [];
+
+      for (let i = 0; i < subQueries.length; i += this.config.maxConcurrent) {
+        batches.push(subQueries.slice(i, i + this.config.maxConcurrent));
+      }
+
+      for (const batch of batches) {
+        const batchResults = await Promise.allSettled(
+          batch.map(sq => this.executeQuery(sq, context))
+        );
+        results.push(...batchResults
+          .filter(r => r.status === 'fulfilled')
+          .map(r => r.value)
+        );
+      }
+
+      return results;
+    },
+
+    // Execute individual query with timeout and error handling
+    async executeQuery(subQuery, context) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), subQuery.timeout);
+
+      try {
+        // Simulate source-specific query execution
+        // In production, this would call actual APIs
+        const mockResult = await this.simulateSourceQuery(subQuery, context, controller.signal);
+        return {
+          sourceId: subQuery.source.id,
+          sourceName: subQuery.source.name,
+          sourceType: subQuery.source.type,
+          query: subQuery.query,
+          result: mockResult,
+          latency: Math.random() * subQuery.source.latencyMs,
+          success: true,
+        };
+      } catch (err) {
+        return {
+          sourceId: subQuery.source.id,
+          sourceName: subQuery.source.name,
+          query: subQuery.query,
+          error: err.message,
+          success: false,
+        };
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+
+    // Simulate query execution (replace with real API calls in production)
+    async simulateSourceQuery(subQuery, context, signal) {
+      await new Promise((resolve, reject) => {
+        const delay = Math.random() * subQuery.source.latencyMs;
+        const t = setTimeout(resolve, delay);
+        signal.addEventListener('abort', () => {
+          clearTimeout(t);
+          reject(new Error('Query timed out'));
+        });
+      });
+
+      return {
+        findings: [
+          { text: `Finding from ${subQuery.source.name}: relevant data point`, confidence: 0.8 + Math.random() * 0.15 },
+          { text: `Secondary insight from ${subQuery.source.name}`, confidence: 0.7 + Math.random() * 0.2 },
+        ],
+        citations: subQuery.source.type === 'search-ai' ? ['https://example.com/source1', 'https://example.com/source2'] : [],
+        rawResponse: `[Simulated response from ${subQuery.source.name}]`,
+      };
+    },
+
+    // Deduplicate results using semantic similarity
+    deduplicateResults(results) {
+      const allFindings = results
+        .filter(r => r.success && r.result?.findings)
+        .flatMap(r => r.result.findings.map(f => ({ ...f, source: r.sourceId })));
+
+      // Simple deduplication: remove near-identical findings
+      // In production, use embedding similarity
+      const unique = [];
+      for (const finding of allFindings) {
+        const isDuplicate = unique.some(u =>
+          this.stringSimilarity(u.text, finding.text) > this.config.deduplicationThreshold
+        );
+        if (!isDuplicate) unique.push(finding);
+      }
+
+      return unique;
+    },
+
+    // Simple string similarity (Jaccard-like)
+    stringSimilarity(a, b) {
+      const setA = new Set(a.toLowerCase().split(/\s+/));
+      const setB = new Set(b.toLowerCase().split(/\s+/));
+      const intersection = [...setA].filter(w => setB.has(w)).length;
+      const union = new Set([...setA, ...setB]).size;
+      return intersection / union;
+    },
+
+    // Score results by multi-factor confidence
+    scoreResults(findings, context) {
+      return findings.map(finding => ({
+        ...finding,
+        score: this.calculateConfidenceScore(finding, context),
+      })).sort((a, b) => b.score - a.score);
+    },
+
+    // Multi-factor confidence scoring
+    calculateConfidenceScore(finding, context) {
+      const w = this.config.confidenceWeights;
+      const baseConfidence = finding.confidence || 0.5;
+
+      // Recency bonus (findings from real-time sources score higher)
+      const recencyScore = finding.source === 'perplexity' || finding.source === 'google-search' ? 1.0 : 0.6;
+
+      // Source authority (internal KB and LLMs score higher)
+      const authorityScore = finding.source === 'internal-kb' ? 1.0 :
+        finding.source?.includes('openai') || finding.source?.includes('anthropic') ? 0.9 : 0.7;
+
+      // Cross-reference bonus (found in multiple sources)
+      const crossRefScore = 0.7; // Simplified; production would check overlap
+
+      // Model consensus (simplified)
+      const consensusScore = baseConfidence;
+
+      return (
+        w.recency * recencyScore +
+        w.sourceAuthority * authorityScore +
+        w.crossReference * crossRefScore +
+        w.modelConsensus * consensusScore
+      );
+    },
+
+    // Synthesize findings into structured intelligence report
+    synthesize(scoredFindings, task) {
+      const topFindings = scoredFindings.slice(0, 10);
+      const avgConfidence = topFindings.reduce((s, f) => s + f.score, 0) / (topFindings.length || 1);
+
+      return {
+        summary: `Gathered ${scoredFindings.length} unique findings across ${this.sources.length} sources.`,
+        confidence: Math.round(avgConfidence * 100) / 100,
+        keyInsights: topFindings.slice(0, 3).map(f => f.text),
+        topFindings,
+        recommendation: avgConfidence > 0.8
+          ? 'High confidence synthesis. Proceed with findings.'
+          : avgConfidence > 0.6
+            ? 'Moderate confidence. Consider additional verification.'
+            : 'Low confidence. Gather more data before acting.',
+      };
+    },
+  };
+
+  // ── INTELLIGENT TASK ORCHESTRATOR ─────────────
+  // Breaks complex tasks into atomic subtasks,
+  // assigns to optimal agents, and merges results
+
+  const TaskOrchestrator = {
+    // Active task registry
+    activeTasks: new Map(),
+
+    // Task decomposition templates by category
+    decompositionTemplates: {
+      'seo-audit': [
+        { step: 1, name: 'Technical SEO', query: 'Check site speed, crawlability, schema markup' },
+        { step: 2, name: 'On-Page Analysis', query: 'Analyze title tags, meta descriptions, content quality' },
+        { step: 3, name: 'Backlink Profile', query: 'Evaluate link quality, anchor text distribution' },
+        { step: 4, name: 'Competitor Gap', query: 'Identify keyword and content gaps vs top competitors' },
+        { step: 5, name: 'Action Plan', query: 'Synthesize findings into prioritized action items' },
+      ],
+      'market-research': [
+        { step: 1, name: 'Market Size', query: 'Estimate total addressable market and segments' },
+        { step: 2, name: 'Competitor Analysis', query: 'Map key players, positioning, pricing' },
+        { step: 3, name: 'Customer Research', query: 'Identify ICP pain points and buying triggers' },
+        { step: 4, name: 'Trend Analysis', query: 'Surface emerging trends and disruptions' },
+        { step: 5, name: 'Opportunity Map', query: 'Identify whitespace and differentiation opportunities' },
+      ],
+      'content-strategy': [
+        { step: 1, name: 'Keyword Research', query: 'Find high-value, rankable keyword clusters' },
+        { step: 2, name: 'Content Audit', query: 'Evaluate existing content performance and gaps' },
+        { step: 3, name: 'Competitor Content', query: 'Analyze top-performing competitor content' },
+        { step: 4, name: 'Topic Clusters', query: 'Build topic cluster architecture' },
+        { step: 5, name: 'Editorial Calendar', query: 'Generate 90-day content production plan' },
+      ],
+    },
+
+    // Submit complex task for orchestrated execution
+    async submit(taskDefinition) {
+      const taskId = `task_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
+      const task = {
+        id: taskId,
+        definition: taskDefinition,
+        status: 'queued',
+        progress: 0,
+        subtasks: [],
+        results: [],
+        startTime: Date.now(),
+        estimatedDuration: 0,
+      };
+
+      this.activeTasks.set(taskId, task);
+
+      // Decompose into subtasks
+      const subtasks = this.decompose(taskDefinition);
+      task.subtasks = subtasks;
+      task.estimatedDuration = subtasks.reduce((s, st) => s + st.estimatedMs, 0);
+      task.status = 'running';
+
+      // Execute subtasks
+      this.executeSubtasks(taskId, subtasks).catch(err => {
+        task.status = 'failed';
+        task.error = err.message;
+      });
+
+      return taskId;
+    },
+
+    // Decompose task into subtasks based on category or custom definition
+    decompose(taskDefinition) {
+      const template = this.decompositionTemplates[taskDefinition.category];
+      if (template) {
+        return template.map(t => ({
+          ...t,
+          id: `st_${t.step}`,
+          status: 'pending',
+          estimatedMs: 3000 + Math.random() * 2000,
+        }));
+      }
+
+      // Custom decomposition for ad-hoc tasks
+      return [
+        {
+          id: 'st_1',
+          step: 1,
+          name: 'Research',
+          query: taskDefinition.query,
+          status: 'pending',
+          estimatedMs: 5000,
+        },
+        {
+          id: 'st_2',
+          step: 2,
+          name: 'Analysis',
+          query: `Analyze: ${taskDefinition.query}`,
+          status: 'pending',
+          estimatedMs: 4000,
+        },
+        {
+          id: 'st_3',
+          step: 3,
+          name: 'Synthesis',
+          query: `Synthesize findings for: ${taskDefinition.query}`,
+          status: 'pending',
+          estimatedMs: 3000,
+        },
+      ];
+    },
+
+    // Execute subtasks with dependency management
+    async executeSubtasks(taskId, subtasks) {
+      const task = this.activeTasks.get(taskId);
+      if (!task) return;
+
+      for (const subtask of subtasks) {
+        subtask.status = 'running';
+        subtask.startTime = Date.now();
+        this.broadcastProgress(taskId);
+
+        try {
+          // Execute subtask via FanOut engine
+          const result = await FanOutEngine.query({
+            query: subtask.query,
+            step: subtask.step,
+            taskId,
+          });
+
+          subtask.status = 'completed';
+          subtask.result = result;
+          subtask.duration = Date.now() - subtask.startTime;
+          task.results.push({ subtask: subtask.name, ...result.synthesis });
+          task.progress = Math.round((subtasks.filter(s => s.status === 'completed').length / subtasks.length) * 100);
+
+        } catch (err) {
+          subtask.status = 'failed';
+          subtask.error = err.message;
+        }
+
+        this.broadcastProgress(taskId);
+      }
+
+      task.status = 'completed';
+      task.duration = Date.now() - task.startTime;
+      task.finalSynthesis = this.mergeSyntheses(task.results);
+      this.broadcastProgress(taskId);
+    },
+
+    // Merge multiple subtask syntheses into final report
+    mergeSyntheses(results) {
+      const allInsights = results.flatMap(r => r.keyInsights || []);
+      const avgConfidence = results.reduce((s, r) => s + (r.confidence || 0), 0) / (results.length || 1);
+
+      return {
+        totalSubtasks: results.length,
+        completedSubtasks: results.filter(r => r.summary).length,
+        overallConfidence: Math.round(avgConfidence * 100) / 100,
+        consolidatedInsights: [...new Set(allInsights)].slice(0, 10),
+        executiveSummary: `Completed ${results.length} intelligence subtasks with ${Math.round(avgConfidence * 100)}% average confidence.`,
+      };
+    },
+
+    // Broadcast progress updates to subscribers
+    broadcastProgress(taskId) {
+      const task = this.activeTasks.get(taskId);
+      if (!task) return;
+
+      window.dispatchEvent(new CustomEvent('orchestrator:progress', {
+        detail: { taskId, task }
+      }));
+    },
+
+    // Get task status
+    getTask(taskId) {
+      return this.activeTasks.get(taskId);
+    },
+
+    // List all active tasks
+    listTasks() {
+      return [...this.activeTasks.values()];
+    },
+  };
+
+  // ── INIT ───────────────────────────────────────
+  async function init() {
+    // Load config first
+    try {
+      const config = await fetch('/api/config').then(r => r.json()).catch(() => ({}));
+      SUPABASE_URL = config.supabase_url || '';
+      SUPABASE_ANON_KEY = config.supabase_anon_key || '';
+      STRIPE_PK = config.stripe_pk || '';
+    } catch (e) {
+      console.warn('Config load failed, using defaults');
+    }
+
+    // Initialize Supabase
+    if (SUPABASE_URL && SUPABASE_ANON_KEY) {
+      supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    } else {
+      // Fallback: create a minimal supabase-like interface
+      supabase = {
+        auth: {
+          signInWithPassword: async ({ email, password }) => {
+            const data = await apiFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }).catch(e => { throw e; });
+            currentSession = data.session || data;
+            if (currentSession?.access_token) {
+              navigate('#/dashboard');
+            }
+            return { data, error: null };
+          },
+          signUp: async ({ email, password, options }) => {
+            const data = await apiFetch('/api/auth/signup', { method: 'POST', body: JSON.stringify({ email, password, ...options?.data }) }).catch(e => { throw e; });
+            return { data, error: null };
+          },
+          resetPasswordForEmail: async (email) => {
+            await apiFetch('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ email }) }).catch(e => { throw e; });
+            return { error: null };
+          },
+          signOut: async () => {
+            await apiFetch('/api/auth/logout', { method: 'POST' }).catch(() => {});
+            currentSession = null;
+            return { error: null };
+          },
+          getSession: async () => {
+            const data = await apiFetch('/api/auth/session').catch(() => null);
+            if (data?.session) currentSession = data.session;
+            return { data: { session: currentSession }, error: null };
+          },
+          onAuthStateChange: (cb) => {
+            // Polling fallback for non-Supabase auth
+            const poll = setInterval(async () => {
+              const data = await apiFetch('/api/auth/session').catch(() => null);
+              if (data?.session && !currentSession) {
+                currentSession = data.session;
+                cb('SIGNED_IN', currentSession);
+              } else if (!data?.session && currentSession) {
+                currentSession = null;
+                cb('SIGNED_OUT', null);
+              }
+            }, 5000);
+            return { data: { subscription: { unsubscribe: () => clearInterval(poll) } } };
+          },
+          updateUser: async ({ password }) => {
+            await apiFetch('/api/auth/update-password', { method: 'POST', body: JSON.stringify({ password }) }).catch(e => { throw e; });
+            return { error: null };
+          },
+        },
+      };
+    }
+
+    // Set up auth state listener
+    supabase.auth.onAuthStateChange((event, session) => {
+      currentSession = session;
+      if (event === 'SIGNED_OUT') {
+        cachedProfile = null;
+        navigate('#/login');
+      } else if (event === 'SIGNED_IN') {
+        navigate('#/dashboard');
+      }
+      render();
+    });
+
+    // Try to restore existing session
+    const { data } = await supabase.auth.getSession();
+    currentSession = data?.session || null;
+
+    // Expose public API
+    window.NC = {
+      render,
+      navigate,
+      toggleSidebar() {
+        sidebarOpen = !sidebarOpen;
+        document.getElementById('sidebar')?.classList.toggle('open', sidebarOpen);
+      },
+      prefillTemplate(id) {
+        wizardData.template_id = id;
+      },
+      FanOutEngine,
+      TaskOrchestrator,
+    };
+
+    // Handle hash changes for routing
+    window.addEventListener('hashchange', render);
+
+    // Initial render
+    render();
+  }
+
+  // ── BOOT ───────────────────────────────────
+  init();
+
+})();
