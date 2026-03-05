@@ -1,0 +1,234 @@
+iv class="form-group">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="forgot-email" placeholder="you@example.com" required>
+          </div>
+          <button type="submit" class="btn btn-primary btn-lg" id="forgot-btn">Send Reset Link</button>
+        </form>
+        <div class="auth-links">
+          <a href="#/login">Back to sign in</a>
+        </div>
+      </div>`;
+  }
+
+  function bindAuthEvents(route) {
+    if (route === '#/login') {
+      const form = document.getElementById('login-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('login-btn');
+        const email = document.getElementById('login-email').value.trim();
+        const password = document.getElementById('login-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Signing in...';
+        document.getElementById('auth-error').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+          // Session is set via onAuthStateChange
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Sign In';
+        }
+      });
+    } else if (route === '#/signup') {
+      const form = document.getElementById('signup-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('signup-btn');
+        const name = document.getElementById('signup-name').value.trim();
+        const email = document.getElementById('signup-email').value.trim();
+        const password = document.getElementById('signup-password').value;
+        btn.disabled = true;
+        btn.textContent = 'Creating account...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { data, error } = await supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { display_name: name || email.split('@')[0] } }
+          });
+          if (error) throw error;
+          // Check if auto-confirm is off (no session returned)
+          if (!data.session) {
+            document.getElementById('auth-success').innerHTML = `<div class="auth-success">Check your email to confirm your account before signing in.</div>`;
+            btn.textContent = 'Account Created';
+          }
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Create Account';
+        }
+      });
+    } else if (route === '#/forgot') {
+      const form = document.getElementById('forgot-form');
+      form?.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = document.getElementById('forgot-btn');
+        const email = document.getElementById('forgot-email').value.trim();
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        document.getElementById('auth-error').innerHTML = '';
+        document.getElementById('auth-success').innerHTML = '';
+        try {
+          const { error } = await supabase.auth.resetPasswordForEmail(email);
+          if (error) throw error;
+          document.getElementById('auth-success').innerHTML = `<div class="auth-success">If that email exists, we've sent a reset link.</div>`;
+          btn.textContent = 'Sent';
+        } catch (err) {
+          document.getElementById('auth-error').innerHTML = `<div class="auth-error">${escapeHtml(err.message)}</div>`;
+          btn.disabled = false;
+          btn.textContent = 'Send Reset Link';
+        }
+      });
+    }
+  }
+
+  // ── APP SHELL ──────────────────────────
+  function renderAppShell(route, container) {
+    const navItems = [
+      { icon: 'layout-dashboard', label: 'Dashboard', hash: '#/dashboard' },
+      { icon: 'radar', label: 'Command Center', hash: '#/command-center' },
+      { icon: 'bot', label: 'My Agents', hash: '#/agents' },
+      { icon: 'plus-circle', label: 'Create Agent', hash: '#/wizard' },
+      { icon: 'layers', label: 'Templates', hash: '#/templates' },
+      { icon: 'plug', label: 'Connections', hash: '#/connections' },
+      { icon: 'credit-card', label: 'Billing', hash: '#/billing' },
+      { icon: 'settings', label: 'Settings', hash: '#/settings' },
+    ];
+
+    const activeHash = route.startsWith('#/agent/') ? '#/agents' : route.split('?')[0];
+    const userName = cachedProfile?.display_name || currentSession?.user?.user_metadata?.display_name || 'User';
+    const userEmail = cachedProfile?.email || currentSession?.user?.email || '';
+    const userInitial = (userName[0] || 'U').toUpperCase();
+
+    // Determine page title
+    let pageTitle = 'Dashboard';
+    if (route === '#/command-center') pageTitle = 'Command Center';
+    else if (route === '#/agents') pageTitle = 'My Agents';
+    else if (route === '#/wizard') pageTitle = 'Create Agent';
+    else if (route === '#/templates') pageTitle = 'Templates';
+    else if (route === '#/connections') pageTitle = 'Connections';
+    else if (route === '#/billing') pageTitle = 'Billing';
+    else if (route === '#/settings') pageTitle = 'Settings';
+    else if (route.startsWith('#/agent/')) pageTitle = 'Agent Detail';
+
+    container.innerHTML = `
+      <div class="app-shell">
+        <aside class="sidebar" id="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-brand-icon">${LOGO_SVG}</div>
+            <div class="sidebar-brand-name">Croutons Agents</div>
+          </div>
+          <nav class="sidebar-nav">
+            <div class="sidebar-section-label">Navigation</div>
+            ${navItems.map(item => `
+              <a href="${item.hash}" class="${activeHash === item.hash ? 'active' : ''}">
+                <i data-lucide="${item.icon}"></i>
+                <span>${item.label}</span>
+              </a>
+            `).join('')}
+          </nav>
+          <div class="sidebar-footer">
+            <div class="sidebar-user">
+              <div class="sidebar-user-avatar">${userInitial}</div>
+              <div class="sidebar-user-info">
+                <div class="sidebar-user-name">${escapeHtml(userName)}</div>
+                <div class="sidebar-user-email">${escapeHtml(userEmail)}</div>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <header class="header">
+          <div class="header-left">
+            <button class="hamburger" id="hamburger-btn" onclick="window.NC.toggleSidebar()">
+              <i data-lucide="menu"></i>
+            </button>
+            <span class="header-title">${escapeHtml(pageTitle)}</span>
+          </div>
+          <div class="header-right">
+            <button class="btn btn-ghost btn-sm" id="logout-btn">
+              <i data-lucide="log-out"></i>
+              Sign Out
+            </button>
+          </div>
+        </header>
+
+        <main class="main-content app-bg" id="main-content">
+          <div class="loading-center"><div class="loading-spinner"></div></div>
+        </main>
+      </div>`;
+
+    // Bind logout
+    document.getElementById('logout-btn')?.addEventListener('click', async () => {
+      await supabase.auth.signOut();
+      currentSession = null;
+      cachedProfile = null;
+      navigate('#/login');
+    });
+
+    // Fetch profile if needed, then render page content
+    ensureProfile().then(() => {
+      renderPageContent(route);
+    });
+  }
+
+  async function ensureProfile() {
+    if (cachedProfile) return;
+    try {
+      cachedProfile = await apiFetch('/api/profile');
+    } catch (err) {
+      // Profile might not exist yet for new users, that's ok
+      cachedProfile = {
+        email: currentSession?.user?.email || '',
+        display_name: currentSession?.user?.user_metadata?.display_name || '',
+        plan: 'free',
+        api_calls_this_month: 0,
+        api_calls_limit: 100,
+      };
+    }
+  }
+
+  // ── PAGE CONTENT ROUTER ──────────────────
+  function renderPageContent(route) {
+    const main = document.getElementById('main-content');
+    if (!main) return;
+
+    if (route === '#/dashboard') renderDashboard(main);
+    else if (route === '#/command-center') renderCommandCenter(main);
+    else if (route === '#/agents') renderAgents(main);
+    else if (route === '#/wizard') renderWizard(main);
+    else if (route === '#/templates') renderTemplates(main);
+    else if (route === '#/connections') renderConnections(main);
+    else if (route === '#/billing') renderBilling(main);
+    else if (route === '#/settings') renderSettings(main);
+    else if (route.startsWith('#/agent/')) {
+      const params = getRouteParams('#/agent/:id', route);
+      if (params) renderAgentDetail(main, params.id);
+      else renderDashboard(main);
+    }
+    else renderDashboard(main);
+  }
+
+  // ── DASHBOARD VIEW ─────────────────────────
+  async function renderDashboard(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const data = await apiFetch('/api/dashboard');
+      const plan = data.current_plan || 'free';
+      const callsPct = data.api_calls_limit > 0 ? Math.min((data.api_calls_this_month / data.api_calls_limit) * 100, 100) : 0;
+      const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
+
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Dashboard</h1>
+          <p class="page-subtitle">Overview of your AI agents and usage</p>
+        </div>
+
+        <div class="kpi-grid">
+          <div class="kpi-card">
+            <div class="kpi-label">Total Agents</div>
+            <div class="kpi-value">${data.total_agents}</div>
+            <div class="kpi
