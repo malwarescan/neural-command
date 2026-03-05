@@ -1,10 +1,10 @@
-name: Merge app.js 5 parts
+name: Merge app.js chunks
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'static/app.js.p5'
+      - 'static/app.js.c16'
 
 jobs:
   merge:
@@ -12,26 +12,19 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        
-      - name: Merge parts
+      - uses: actions/checkout@v4
+      - name: Merge
         run: |
-          for p in p1 p2 p3 p4 p5; do
-            if [ ! -f "static/app.js.$p" ]; then
-              echo "Missing: static/app.js.$p"
-              exit 1
-            fi
-          done
-          cat static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5 > static/app.js
-          echo "Merged size: $(wc -c < static/app.js) bytes"
-          rm static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5
-          
+          files=(static/app.js.c01 static/app.js.c02 static/app.js.c03 static/app.js.c04 static/app.js.c05 static/app.js.c06 static/app.js.c07 static/app.js.c08 static/app.js.c09 static/app.js.c10 static/app.js.c11 static/app.js.c12 static/app.js.c13 static/app.js.c14 static/app.js.c15 static/app.js.c16)
+          for f in "${files[@]}"; do [ -f "$f" ] || { echo "Missing $f"; exit 1; }; done
+          cat "${files[@]}" > static/app.js
+          echo "Size: $(wc -c < static/app.js) bytes"
+          rm "${files[@]}"
       - name: Commit
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add static/app.js
-          git rm --cached static/app.js.p1 static/app.js.p2 static/app.js.p3 static/app.js.p4 static/app.js.p5 2>/dev/null || true
-          git commit -m "fix: restore full app.js 160KB from 5 parts" || echo "Nothing to commit"
+          for f in c01 c02 c03 c04 c05 c06 c07 c08 c09 c10 c11 c12 c13 c14 c15 c16; do git rm --cached "static/app.js.$f" 2>/dev/null || true; done
+          git commit -m "fix: restore full app.js 160KB from 16 chunks" || echo "Nothing to commit"
           git push
