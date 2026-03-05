@@ -1,0 +1,207 @@
+/* ═══════════════════════════════════════════════
+   Croutons Agents — Production Frontend SPA
+   ═══════════════════════════════════════════════ */
+
+(function () {
+  'use strict';
+
+  // ── CONFIG (loaded from /api/config) ──────
+  const API = '';
+  let SUPABASE_URL = '';
+  let SUPABASE_ANON_KEY = ''; 
+  let _configLoaded = false;
+
+  async function loadConfig() {
+    if (_configLoaded) return;
+    try {
+      const r = await fetch(`${API}/api/config`);
+      if (!r.ok) throw new Error('config failed');
+      const d = await r.json();
+      SUPABASE_URL      = d.supabase_url      || '';
+      SUPABASE_ANON_KEY = d.supabase_anon_key || '';
+      _configLoaded = true;
+    } catch(e) {
+      console.error('Config load error:', e);
+    }
+  }
+
+  // ── SUPABASE HELPERS ──────────────────────
+  function supabaseClient() {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+    return window.supabase?.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  }
+
+  // ── ROUTER ────────────────────────────────
+  const routes = {};
+  function on(path, fn)  { routes[path] = fn; }
+  function navigate(url) { location.hash = url; }
+
+  function router() {
+    const hash = location.hash.replace('#', '') || '/';
+    const [path, qs]  = hash.split('?');
+    const params = Object.fromEntries(new URLSearchParams(qs || ''));
+    const handler = routes[path] || routes['/404'];
+    if (handler) handler(params);
+  }
+  window.addEventListener('hashchange', router);
+
+  // ── TOAST ─────────────────────────────────
+  function showToast(msg, type = 'success') {
+    const c = document.getElementById('toast-container');
+    if (!c) return;
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    const icons = { success: 'check-circle', error: 'alert-circle', info: 'info' };
+    t.innerHTML = `<i data-lucide="${icons[type] || 'info'}"></i><span>${msg}</span>`;
+    c.appendChild(t);
+    if (window.lucide) window.lucide.createIcons({ icons: window.lucide.icons });
+    setTimeout(() => t.classList.add('toast-show'), 10);
+    setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3500);
+  }
+
+  // ── AUTH HELPERS ──────────────────────────
+  async function getSession() {
+    await loadConfig();
+    const sb = supabaseClient();
+    if (!sb) return null;
+    const { data } = await sb.auth.getSession();
+    return data?.session ?? null;
+  }
+
+  async function requireAuth() {
+    const s = await getSession();
+    if (!s) { navigate('/login'); return null; }
+    return s;
+  }
+
+  async function getAuthHeaders() {
+    const s = await getSession();
+    if (!s) return {};
+    return { 'Authorization': `Bearer ${s.access_token}` };
+  }
+
+  // ── API HELPERS ───────────────────────────
+  async function apiGet(path) {
+    const h = await getAuthHeaders();
+    const r = await fetch(`${API}${path}`, { headers: h });
+    if (!r.ok) throw new Error(`GET ${path} → ${r.status}`);
+    return r.json();
+  }
+  async function apiPost(path, body) {
+    const h = await getAuthHeaders();
+    const r = await fetch(`${API}${path}`, {
+      method: 'POST', headers: { ...h, 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (!r.ok) throw new Error(`POST ${path} → ${r.status}`);
+    return r.json();
+  }
+  async function apiDelete(path) {
+    const h = await getAuthHeaders();
+    const r = await fetch(`${API}${path}`, { method: 'DELETE', headers: h });
+    if (!r.ok) throw new Error(`DELETE ${path} → ${r.status}`);
+    return r.json();
+  }
+
+  // ── RENDER HELPERS ────────────────────────
+  function renderApp(html) {
+    const app = document.getElementById('app');
+    if (app) app.innerHTML = html;
+    if (window.lucide) window.lucide.createIcons({ icons: window.lucide.icons });
+  }
+
+  // ── FORMAT HELPERS ────────────────────────
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('en-US', {month:'short',day:'numeric',year:'numeric'});
+  }
+  function fmtTime(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleTimeString('en-US', {hour:'2-digit',minute:'2-digit'});
+  }
+
+  // ── SHARED SIDEBAR ────────────────────────
+  function sidebarHTML(active) {
+    const links = [
+      { href: '#/', icon: 'layout-dashboard', label: 'Dashboard' },
+      { href: '#/agents', icon: 'bot', label: 'Agents' },
+      { href: '#/templates', icon: 'layout-template', label: 'Templates' },
+      { href: '#/wizard', icon: 'wand-sparkles', label: 'Create Agent' },
+      { href: '#/tasks', icon: 'list-checks', label: 'Tasks' },
+      { href: '#/analytics', icon: 'bar-chart-2', label: 'Analytics' },
+      { href: '#/integrations', icon: 'plug', label: 'Integrations' },
+      { href: '#/billing', icon: 'credit-card', label: 'Billing' },
+      { href: '#/settings', icon: 'settings', label: 'Settings' },
+    ];
+    return `
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <a href="#/" class="sidebar-logo">
+          <i data-lucide="cpu" class="sidebar-logo-icon"></i>
+          <span>Croutons</span>
+        </a>
+        <button class="sidebar-close" onclick="window.NC.toggleSidebar()">
+          <i data-lucide="x"></i>
+        </button>
+      </div>
+      <nav class="sidebar-nav">
+        ${links.map(l => `
+          <a href="${l.href}" class="sidebar-link${l.href === active ? ' active' : ''}">
+            <i data-lucide="${l.icon}"></i>
+            <span>${l.label}</span>
+          </a>`).join('')}
+      </nav>
+      <div class="sidebar-footer">
+        <a href="#/settings" class="sidebar-link${active === '#/settings' ? ' active' : ''}">
+          <i data-lucide="user"></i>
+          <span>Account</span>
+        </a>
+        <button class="sidebar-link" id="logout-btn">
+          <i data-lucide="log-out"></i>
+          <span>Logout</span>
+        </button>
+      </div>
+    </aside>`;
+  }
+
+  function layoutHTML(active, content) {
+    return `
+    <div class="layout">
+      ${sidebarHTML(active)}
+      <div class="main-content" id="main-content">
+        <div class="topbar">
+          <button class="topbar-menu-btn" onclick="window.NC.toggleSidebar()">
+            <i data-lucide="menu"></i>
+          </button>
+        </div>
+        ${content}
+      </div>
+    </div>`;
+  }
+
+  function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const backdrop = document.getElementById('sidebar-backdrop');
+    if (sidebar) sidebar.classList.toggle('sidebar-open');
+    if (backdrop) backdrop.classList.toggle('backdrop-open');
+  }
+  window.NC = window.NC || {};
+  window.NC.toggleSidebar = toggleSidebar;
+
+  // ── PAGES ─────────────────────────────────
+
+  // ── LOGIN PAGE ────────────────────────────
+  async function loginPage() {
+    renderApp(`
+      <div class="auth-container">
+        <div class="auth-card">
+          <div class="auth-logo">
+            <i data-lucide="cpu" class="auth-logo-icon"></i>
+            <h1>Croutons</h1>
+          </div>
+          <p class="auth-subtitle">Sign in to your account</p>
+          <div class="auth-tabs">
+            <button class="auth-tab active" id="tab-login">Sign In</button>
+            <button class="auth-tab" id="tab-signup">Create Account</button>
+          </div>
+          <for
