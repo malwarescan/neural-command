@@ -36,7 +36,7 @@
   };
 
   // ── LOGO SVG ───────────────────────────────
-  const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NCq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
+  const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NBq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
 
   // ── HELPERS ────────────────────────────────
   function $(sel) { return document.querySelector(sel); }
@@ -850,28 +850,28 @@
     el.innerHTML = `
       <div class="cc-section-header">
         <span class="cc-section-badge cc-badge-purple">AEO / GEO</span>
-        <span class="text-sm text-muted">Answer Engine &amp; Generative Engine Optimization</span>
+        <span class="text-sm text-muted">Answer Engine &amp; Generative Engine Optimization &mdash; powered by Resoneo research</span>
       </div>
 
       <div class="cc-kpi-grid cc-kpi-grid-3">
         <div class="cc-kpi">
           <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="eye" style="width:18px;height:18px"></i></div>
           <div class="cc-kpi-body">
-            <div class="cc-kpi-value">—</div>
+            <div class="cc-kpi-value">&mdash;</div>
             <div class="cc-kpi-label">AI Visibility Score</div>
           </div>
         </div>
         <div class="cc-kpi">
           <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="quote" style="width:18px;height:18px"></i></div>
           <div class="cc-kpi-body">
-            <div class="cc-kpi-value">—</div>
+            <div class="cc-kpi-value">&mdash;</div>
             <div class="cc-kpi-label">Citation Frequency</div>
           </div>
         </div>
         <div class="cc-kpi">
           <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="message-circle" style="width:18px;height:18px"></i></div>
           <div class="cc-kpi-body">
-            <div class="cc-kpi-value">—</div>
+            <div class="cc-kpi-value">&mdash;</div>
             <div class="cc-kpi-label">Brand Sentiment</div>
           </div>
         </div>
@@ -879,43 +879,80 @@
 
       <div class="cc-grid-2" style="margin-top:16px">
         <div class="card">
-          <div class="card-header"><h3 class="card-title">AI Models Tracked</h3></div>
-          <div class="cc-ai-models">
-            <div class="cc-ai-model"><span class="cc-model-dot" style="background:#10a37f"></span>ChatGPT / OpenAI<span class="badge">Active</span></div>
-            <div class="cc-ai-model"><span class="cc-model-dot" style="background:#7c3aed"></span>Perplexity AI<span class="badge">Active</span></div>
-            <div class="cc-ai-model"><span class="cc-model-dot" style="background:#c96442"></span>Claude / Anthropic<span class="badge">Active</span></div>
-            <div class="cc-ai-model"><span class="cc-model-dot" style="background:#4285f4"></span>Gemini / Google<span class="badge">Active</span></div>
-            <div class="cc-ai-model"><span class="cc-model-dot" style="background:#0078d4"></span>Copilot / Microsoft<span class="badge">Active</span></div>
+          <div class="card-header"><h3 class="card-title">How ChatGPT Cites Your Content</h3></div>
+          <div style="padding:4px 0">
+            <p class="text-sm" style="margin-bottom:12px">ChatGPT uses SerpAPI (scrapes Google) for web search, SearchAPI.io for Shopping, and Labrador/Bright for images. Understanding citation types is critical for visibility:</p>
+            <div class="cc-activity-list">
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#10b981;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Citations [1][2][3] &mdash; HIGH visibility</span>
+                  <span class="cc-activity-text">Numbered inline citations in the response text. Clickable links. Highest SEO value.</span>
+                </div>
+              </div>
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#f59e0b;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Other Sources / More &mdash; MEDIUM visibility</span>
+                  <span class="cc-activity-text">Appears in Sources section at bottom. Less prominent but still drives referral traffic.</span>
+                </div>
+              </div>
+              <div class="cc-activity-item">
+                <span class="cc-service-dot" style="background:#ef4444;width:10px;height:10px;flex-shrink:0"></span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">Hidden Links (ref_type: academia) &mdash; NEVER shown</span>
+                  <span class="cc-activity-text">Used for grounding but never displayed. Applies to Wikipedia, arXiv, and similar authority sources.</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
         <div class="card">
-          <div class="card-header"><h3 class="card-title">Setup Required</h3></div>
-          <div style="padding:16px 0">
-            <p class="text-sm" style="margin-bottom:12px">AI visibility monitoring requires your agents to periodically query LLMs about your brand/site and track responses.</p>
-            <div class="cc-setup-steps">
-              <div class="cc-setup-step"><span class="cc-step-num">1</span>Create an SEO Analyst agent</div>
-              <div class="cc-setup-step"><span class="cc-step-num">2</span>Configure brand monitoring queries</div>
-              <div class="cc-setup-step"><span class="cc-step-num">3</span>Set agent on daily schedule</div>
-              <div class="cc-setup-step"><span class="cc-step-num">4</span>Metrics populate automatically</div>
-            </div>
-            <a href="#/wizard" class="btn btn-primary btn-sm" style="margin-top:12px">Create Monitoring Agent</a>
+          <div class="card-header"><h3 class="card-title">AI Crawler Capabilities</h3></div>
+          <div style="padding:4px 0">
+            <table class="cc-table">
+              <thead><tr><th>Crawler</th><th>JS Execution</th><th>Shadow DOM</th><th>iframes</th></tr></thead>
+              <tbody>
+                <tr><td>ChatGPT</td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td></tr>
+                <tr><td>Claude</td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td></tr>
+                <tr><td>Gemini</td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td></tr>
+                <tr><td>Bing Copilot</td><td><span style="color:var(--color-success)">Yes (~53ms)</span></td><td>Open only</td><td><span style="color:var(--color-success)">Yes</span></td></tr>
+                <tr><td>Grok</td><td><span style="color:var(--color-success)">Yes (1-2s)</span></td><td><span style="color:var(--color-error)">No</span></td><td><span style="color:var(--color-error)">No</span></td></tr>
+              </tbody>
+            </table>
+            <p class="text-sm text-muted" style="margin-top:10px">Most AI crawlers do not execute JavaScript. Add <code>&lt;noscript&gt;</code> tags with full content &mdash; this is CRITICAL for AI indexing.</p>
           </div>
         </div>
       </div>
 
       <div class="card" style="margin-top:16px">
-        <div class="card-header"><h3 class="card-title">What is AEO / GEO?</h3></div>
+        <div class="card-header"><h3 class="card-title">ChatGPT Search Architecture (Resoneo)</h3></div>
         <div style="padding:4px 0">
           <div class="cc-info-grid">
             <div class="cc-info-block">
-              <h4 class="cc-info-title">AEO — Answer Engine Optimization</h4>
-              <p class="text-sm">Optimizes your content to appear in AI-generated answers from ChatGPT, Perplexity, Gemini, and others. Tracks how often your brand is cited, the sentiment of mentions, and your share of voice vs competitors.</p>
+              <h4 class="cc-info-title">Sonic Classifier &amp; Fan-Out</h4>
+              <p class="text-sm">A lightweight classifier runs before response generation and determines if fresh web data is needed (search threshold: 65%). Standard mode fires 1-3 parallel search queries; Thinking/Deep Search mode fires 10-30+ recursive fan-outs via SerpAPI.</p>
             </div>
             <div class="cc-info-block">
-              <h4 class="cc-info-title">GEO — Generative Engine Optimization</h4>
-              <p class="text-sm">Structures your content with citations, statistics, and authoritative language so AI engines prefer it. GEO-optimized content sees up to 40% more visibility in AI answers.</p>
+              <h4 class="cc-info-title">Recency Bias &amp; Freshness</h4>
+              <p class="text-sm">ChatGPT already has older content from training data. Web search only fills the gap with recent content. Results are filtered by date before feeding to the model. Freshness windows: 7 days (breaking), 30 days (news), 365 days (established). Always set <code>dateModified</code> in JSON-LD.</p>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3 class="card-title">AEO / GEO Key Recommendations</h3></div>
+        <div style="padding:4px 0">
+          <div class="cc-setup-steps">
+            <div class="cc-setup-step"><span class="cc-step-num" style="background:#ef4444">!</span><strong style="color:var(--color-text)">Add &lt;noscript&gt; tags</strong> &mdash; CRITICAL. Most AI crawlers ignore JavaScript. Your content must exist in static HTML.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">1</span>Add <code>dateModified</code> to JSON-LD structured data to signal freshness to ChatGPT search.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">2</span>Use Q&amp;A format with FAQ schema. ChatGPT classifies queries into verticals and prefers structured answers.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">3</span>Create a brand facts page (e.g., about.your-site.com) to help AI systems understand your entity.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">4</span>Build a Wikipedia/Wikidata presence for entity disambiguation. If your brand isn't in the semantic knowledge graph, it may not exist for AI systems.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">5</span>Keep &gt;50% English content. Ensure meta descriptions are optimized (shown ~1/3 of the time by Google and used by ChatGPT/Perplexity).</div>
+          </div>
+          <a href="#/wizard" class="btn btn-primary btn-sm" style="margin-top:12px">Create AEO Monitoring Agent</a>
         </div>
       </div>
     `;
@@ -957,32 +994,51 @@
         </div>
       </div>
 
-      <div class="card" style="margin-top:16px">
-        <div class="card-header"><h3 class="card-title">LLM Referral Sources to Track</h3></div>
-        <table class="cc-table">
-          <thead><tr><th>Source</th><th>Domain Pattern</th><th>GA4 Regex</th><th>Status</th></tr></thead>
-          <tbody>
-            <tr><td>ChatGPT</td><td>chatgpt.com, chat.openai.com</td><td>chatgpt\\.com|chat\\.openai\\.com</td><td><span class="badge badge-active">Track</span></td></tr>
-            <tr><td>Perplexity</td><td>perplexity.ai</td><td>perplexity\\.ai</td><td><span class="badge badge-active">Track</span></td></tr>
-            <tr><td>Claude</td><td>claude.ai</td><td>claude\\.ai</td><td><span class="badge badge-active">Track</span></td></tr>
-            <tr><td>Gemini</td><td>gemini.google.com</td><td>gemini\\.google\\.com</td><td><span class="badge badge-active">Track</span></td></tr>
-            <tr><td>Copilot</td><td>copilot.microsoft.com</td><td>copilot\\.microsoft\\.com</td><td><span class="badge badge-active">Track</span></td></tr>
-            <tr><td>You.com</td><td>you.com</td><td>you\\.com</td><td><span class="badge">Optional</span></td></tr>
-            <tr><td>Phind</td><td>phind.com</td><td>phind\\.com</td><td><span class="badge">Optional</span></td></tr>
-          </tbody>
-        </table>
+      <div class="cc-grid-2" style="margin-top:16px">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">On-Demand Bots (Real Referral Traffic)</h3></div>
+          <table class="cc-table">
+            <thead><tr><th>Source</th><th>User-Agent</th><th>Domain Pattern</th><th>GA4 Regex</th></tr></thead>
+            <tbody>
+              <tr><td>ChatGPT</td><td><code style="font-size:11px">ChatGPT-User</code></td><td>chatgpt.com, chat.openai.com</td><td><code style="font-size:11px">chatgpt\\.com|chat\\.openai\\.com</code></td></tr>
+              <tr><td>Claude</td><td><code style="font-size:11px">Claude-User</code></td><td>claude.ai</td><td><code style="font-size:11px">claude\\.ai</code></td></tr>
+              <tr><td>Perplexity</td><td><code style="font-size:11px">Perplexity-User</code></td><td>perplexity.ai</td><td><code style="font-size:11px">perplexity\\.ai</code></td></tr>
+              <tr><td>Gemini</td><td>&mdash;</td><td>gemini.google.com</td><td><code style="font-size:11px">gemini\\.google\\.com</code></td></tr>
+              <tr><td>Copilot</td><td>&mdash;</td><td>copilot.microsoft.com</td><td><code style="font-size:11px">copilot\\.microsoft\\.com</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Background Bots (No Referral Traffic)</h3></div>
+          <div style="padding:4px 0">
+            <p class="text-sm text-muted" style="margin-bottom:8px">These bots crawl your site but don't generate direct referral traffic. Block or allow via robots.txt.</p>
+            <table class="cc-table">
+              <thead><tr><th>Bot</th><th>Type</th><th>Traffic share</th></tr></thead>
+              <tbody>
+                <tr><td><code style="font-size:11px">GPTBot</code></td><td>Training</td><td>~80% of AI crawling</td></tr>
+                <tr><td><code style="font-size:11px">CCBot</code></td><td>Training</td><td>~80% combined</td></tr>
+                <tr><td><code style="font-size:11px">Meta-ExternalAgent</code></td><td>Training</td><td>~80% combined</td></tr>
+                <tr><td><code style="font-size:11px">OAI-SearchBot</code></td><td>Index building</td><td>&mdash;</td></tr>
+                <tr><td><code style="font-size:11px">PerplexityBot</code></td><td>Index building</td><td>&mdash;</td></tr>
+                <tr><td><code style="font-size:11px">Claude-SearchBot</code></td><td>Index building</td><td>&mdash;</td></tr>
+              </tbody>
+            </table>
+            <p class="text-sm" style="margin-top:8px;color:var(--color-warning)"><i data-lucide="alert-triangle" style="width:12px;height:12px;display:inline"></i> Some bots use stealth User-Agents (fake Chrome/Firefox). ChatGPT has an 8% 404 rate vs Google's 0.4%.</p>
+          </div>
+        </div>
       </div>
 
       <div class="card" style="margin-top:16px">
-        <div class="card-header"><h3 class="card-title">GA4 Setup Guide</h3></div>
+        <div class="card-header"><h3 class="card-title">GA4 Setup Guide &mdash; LLM Traffic Segment</h3></div>
         <div style="padding:4px 0">
           <div class="cc-setup-steps">
-            <div class="cc-setup-step"><span class="cc-step-num">1</span>Open GA4 > Admin > Data Streams > Configure</div>
-            <div class="cc-setup-step"><span class="cc-step-num">2</span>Create a new exploration or custom segment</div>
-            <div class="cc-setup-step"><span class="cc-step-num">3</span>Filter: <code>Session source</code> matches regex:<br><code class="cc-code">chatgpt\.com|chat\.openai\.com|perplexity\.ai|claude\.ai|gemini\.google\.com|copilot\.microsoft\.com</code></div>
-            <div class="cc-setup-step"><span class="cc-step-num">4</span>Compare conversion rates vs organic Google traffic</div>
+            <div class="cc-setup-step"><span class="cc-step-num">1</span>Open GA4 &gt; Admin &gt; Data Streams &gt; Configure tag settings</div>
+            <div class="cc-setup-step"><span class="cc-step-num">2</span>Create a new Exploration or custom Segment in Reports</div>
+            <div class="cc-setup-step"><span class="cc-step-num">3</span>Filter: <code>Session source</code> matches regex:<br><code class="cc-code">chatgpt\.com|chat\.openai\.com|perplexity\.ai|claude\.ai|gemini\.google\.com|copilot\.microsoft\.com|you\.com|phind\.com</code></div>
+            <div class="cc-setup-step"><span class="cc-step-num">4</span>Also check Cloudflare Analytics &gt; AI Crawl Control report for bot-level traffic data and 404 rates by source.</div>
+            <div class="cc-setup-step"><span class="cc-step-num">5</span>Compare conversion rate, pages/session, and bounce rate vs organic Google traffic segment.</div>
           </div>
-          <p class="text-sm text-muted" style="margin-top:12px">Industry data shows ChatGPT traffic converts at ~16% vs Google Organic ~1.8% (Seer Interactive, 2024).</p>
+          <p class="text-sm text-muted" style="margin-top:12px">Industry data: ChatGPT traffic converts at ~16% vs Google Organic ~1.8% (Seer Interactive, 2024). Monitor crawl-to-publication window correlation to optimize freshness.</p>
         </div>
       </div>
     `;
@@ -1036,6 +1092,29 @@
               <canvas id="cc-competitor-chart" style="max-height:200px"></canvas>
             </div>
             <p class="text-sm text-muted" style="margin-top:12px;text-align:center">Example data — connect agents to populate with real metrics.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:16px">
+        <div class="card-header"><h3 class="card-title">Entity Recognition &amp; Knowledge Graph</h3></div>
+        <div style="padding:4px 0">
+          <div class="cc-info-grid">
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">ChatGPT NER System</h4>
+              <p class="text-sm">ChatGPT uses a proprietary Named Entity Recognition system with disambiguation. Entity format: <code>entity["category","name","disambiguation_string"]</code>. Categories include: people, company, place, and others. gpt-5-instant is used for entity sidebar generation. If your brand isn't properly structured and disambiguated in the semantic layer, it may not exist for ChatGPT.</p>
+            </div>
+            <div class="cc-info-block">
+              <h4 class="cc-info-title">Improving Entity Disambiguation</h4>
+              <p class="text-sm">To ensure AI systems correctly recognize your brand:</p>
+              <ul style="margin-top:8px;padding-left:16px;font-size:12px;color:var(--color-text-secondary);display:flex;flex-direction:column;gap:4px">
+                <li>Create or claim a Wikipedia page and Wikidata entry</li>
+                <li>Add <code>sameAs</code> properties in JSON-LD pointing to Wikipedia, Wikidata, and Crunchbase</li>
+                <li>Use consistent brand name in all structured data</li>
+                <li>Add Organization schema with <code>@id</code>, <code>name</code>, <code>description</code>, and <code>url</code></li>
+                <li>Build a dedicated brand facts / about page with structured data</li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -1190,7 +1269,7 @@
         return;
       }
 
-      const templateIcons = { seo: '🔍', social: '📱', sales: '💼', support: '🎧', content: '✍️', analytics: '📊', custom: '⚙️' };
+      const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
 
       container.innerHTML = `
         <div class="page-header flex justify-between items-center">
@@ -1205,7 +1284,7 @@
             <div class="agent-card" data-id="${agent.id}">
               <div class="agent-card-head">
                 <div style="display:flex;align-items:center;gap:12px">
-                  <div class="agent-card-icon">${templateIcons[agent.template_id] || '⚙️'}</div>
+                  <div class="agent-card-icon">${templateIcons[agent.template_id] || '<i data-lucide="settings" style="width:20px;height:20px"></i>'}</div>
                   <div>
                     <div class="agent-card-name">${escapeHtml(agent.name)}</div>
                     <span class="badge badge-${agent.status}">${agent.status}</span>
@@ -1302,13 +1381,13 @@
 
   // ── AGENT DETAIL VIEW (Tabbed Workspace) ──────────────────────
   async function renderAgentDetail(container, agentId) {
-    const templateIcons = { seo: '🔍', social: '📱', sales: '💼', support: '🎧', content: '✍️', analytics: '📊', custom: '⚙️' };
+    const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
     let activeTab = 'chat';
     let agent = null;
 
     // ── Render the full workspace skeleton ──
     function renderWorkspace() {
-      const icon = templateIcons[agent.template_id] || '⚙️';
+      const icon = templateIcons[agent.template_id] || '<i data-lucide="settings" style="width:20px;height:20px"></i>';
       container.innerHTML = `
         <div class="page-header flex justify-between items-center" style="margin-bottom:0;padding-bottom:12px">
           <div style="display:flex;align-items:center;gap:12px">
@@ -1387,7 +1466,7 @@
           </div>
           <div class="chat-messages" id="chat-messages">
             <div class="chat-empty" id="chat-empty-state">
-              <div class="chat-empty-icon">💬</div>
+              <div class="chat-empty-icon"><i data-lucide="message-circle" style="width:32px;height:32px;color:var(--color-text-muted)"></i></div>
               <div style="font-size:14px;font-weight:500">Start a conversation</div>
               <div style="font-size:12px">Ask your agent anything to get started</div>
             </div>
@@ -1436,7 +1515,7 @@
           if (messagesEl) {
             messagesEl.innerHTML = `
               <div class="chat-empty" id="chat-empty-state">
-                <div class="chat-empty-icon">💬</div>
+                <div class="chat-empty-icon"><i data-lucide="message-circle" style="width:32px;height:32px;color:var(--color-text-muted)"></i></div>
                 <div style="font-size:14px;font-weight:500">Start a conversation</div>
                 <div style="font-size:12px">Ask your agent anything to get started</div>
               </div>`;
@@ -1870,8 +1949,7 @@
               ${t.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
             </div>
           </div>
-        `).join('')}
-      </div>`;
+        `).join('')}`;
 
     el.querySelectorAll('.template-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -1940,12 +2018,12 @@
 
   function renderWizardConnect(el) {
     const services = [
-      { id: 'google_search_console', name: 'Google Search Console', icon: '🔍' },
-      { id: 'google_analytics', name: 'Google Analytics', icon: '📊' },
-      { id: 'social_media', name: 'Social Media', icon: '📱' },
-      { id: 'crm', name: 'CRM', icon: '💼' },
-      { id: 'email', name: 'Email', icon: '✉️' },
-      { id: 'custom_api', name: 'Custom API', icon: '🔌' },
+      { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>' },
+      { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>' },
+      { id: 'social_media', name: 'Social Media', icon: '<i data-lucide="share-2" style="width:20px;height:20px;color:#1d9bf0"></i>' },
+      { id: 'crm', name: 'CRM', icon: '<i data-lucide="briefcase" style="width:20px;height:20px;color:#7c3aed"></i>' },
+      { id: 'email', name: 'Email', icon: '<i data-lucide="mail" style="width:20px;height:20px;color:#10b981"></i>' },
+      { id: 'custom_api', name: 'Custom API', icon: '<i data-lucide="plug" style="width:20px;height:20px;color:#94a3b8"></i>' },
     ];
 
     el.innerHTML = `
@@ -1964,8 +2042,7 @@
             </div>
             <button class="btn btn-secondary btn-sm connect-service-btn" data-service="${s.id}" data-name="${s.name}">Connect</button>
           </div>
-        `).join('')}
-      </div>`;
+        `).join('')}`;
 
     el.querySelectorAll('.connect-service-btn').forEach(btn => {
       btn.addEventListener('click', () => showApiKeyModal(btn.dataset.service, btn.dataset.name, [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}]));
@@ -2144,7 +2221,7 @@
         <div style="display:grid;gap:16px">
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Template</div>
-            <div class="font-semibold">${template.icon || '⚙️'} ${escapeHtml(template.name || wizardData.template_id || 'Custom')}</div>
+            <div class="font-semibold">${template.icon ? `<i data-lucide="${template.icon}" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></i>` : '<i data-lucide="settings" style="width:16px;height:16px;display:inline-block;vertical-align:middle"></i>'} ${escapeHtml(template.name || wizardData.template_id || 'Custom')}</div>
           </div>
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Name</div>
@@ -2313,37 +2390,37 @@
         label: 'Data Sources',
         description: 'Connect analytics and search platforms for your agents to read',
         services: [
-          { id: 'google_search_console', name: 'Google Search Console', icon: '🔍', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
-          { id: 'google_analytics', name: 'Google Analytics', icon: '📊', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
-          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '🅱️', desc: 'Bing search data, crawl stats, SEO issues', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'From Bing Webmaster → Settings → API Access'}] },
-          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '🔥', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
-          { id: 'cloudflare', name: 'Cloudflare', icon: '☁️', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
+          { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
+          { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
+          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '<i data-lucide="globe" style="width:20px;height:20px;color:#00809d"></i>', desc: 'Bing search data, crawl stats, SEO issues', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'From Bing Webmaster → Settings → API Access'}] },
+          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '<i data-lucide="flame" style="width:20px;height:20px;color:#ff6f00"></i>', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
+          { id: 'cloudflare', name: 'Cloudflare', icon: '<i data-lucide="cloud" style="width:20px;height:20px;color:#f38020"></i>', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
         ]
       },
       {
         label: 'AI Models',
         description: 'Configure AI model access for agent intelligence',
         services: [
-          { id: 'openai', name: 'OpenAI', icon: '🤖', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
-          { id: 'google_gemini', name: 'Google Gemini', icon: '💎', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
-          { id: 'nano_banana', name: 'Nano Banana', icon: '🍌', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
+          { id: 'openai', name: 'OpenAI', icon: '<i data-lucide="brain" style="width:20px;height:20px;color:#10a37f"></i>', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
+          { id: 'google_gemini', name: 'Google Gemini', icon: '<i data-lucide="sparkles" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
+          { id: 'nano_banana', name: 'Nano Banana', icon: '<i data-lucide="image" style="width:20px;height:20px;color:#f5c842"></i>', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
         ]
       },
       {
         label: 'Deployment',
         description: 'Push code and manage infrastructure',
         services: [
-          { id: 'github', name: 'GitHub', icon: '🐙', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
+          { id: 'github', name: 'GitHub', icon: '<i data-lucide="github" style="width:20px;height:20px;color:#24292f"></i>', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
         ]
       },
       {
         label: 'Social Publishing',
         description: 'Post and schedule content across social platforms',
         services: [
-          { id: 'twitter', name: 'X (Twitter)', icon: '𝕏', desc: 'Post tweets, threads, and media', auth: 'oauth' },
-          { id: 'facebook', name: 'Facebook', icon: '📘', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
-          { id: 'instagram', name: 'Instagram', icon: '📸', desc: 'Publish posts and stories', auth: 'oauth' },
-          { id: 'tiktok', name: 'TikTok', icon: '🎵', desc: 'Upload videos and manage content', auth: 'oauth' },
+          { id: 'twitter', name: 'X (Twitter)', icon: '<i data-lucide="at-sign" style="width:20px;height:20px;color:#1d9bf0"></i>', desc: 'Post tweets, threads, and media', auth: 'oauth' },
+          { id: 'facebook', name: 'Facebook', icon: '<i data-lucide="thumbs-up" style="width:20px;height:20px;color:#1877f2"></i>', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
+          { id: 'instagram', name: 'Instagram', icon: '<i data-lucide="camera" style="width:20px;height:20px;color:#e4405f"></i>', desc: 'Publish posts and stories', auth: 'oauth' },
+          { id: 'tiktok', name: 'TikTok', icon: '<i data-lucide="music" style="width:20px;height:20px;color:#25f4ee"></i>', desc: 'Upload videos and manage content', auth: 'oauth' },
         ]
       }
     ];
@@ -2361,7 +2438,7 @@
 
       serviceCategories.forEach(cat => {
         html += `
-          <div class="connections-category" style="margin-bottom:32px">
+          <div class="connections-category" style="margin-bottom:var(--space-8)">
             <div style="margin-bottom:16px">
               <h2 style="font-size:18px;font-weight:700;margin:0 0 4px 0">${cat.label}</h2>
               <p class="text-sm text-muted" style="margin:0">${cat.description}</p>
@@ -2384,7 +2461,7 @@
                     </div>
                     <div class="text-xs text-muted" style="margin-top:2px">${s.desc}</div>
                   </div>
-                  <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
+                  <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:12px">
                     ${isConnected ? `
                       <button class="btn btn-ghost btn-sm test-conn-btn" data-service="${s.id}" data-name="${s.name}" title="Test connection">
                         <i data-lucide="activity" style="width:14px;height:14px"></i>
