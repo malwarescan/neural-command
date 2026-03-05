@@ -1,10 +1,10 @@
-name: Merge app.js parts
+name: Merge app.js 3 parts
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - 'static/app.js.part2'
+      - 'static/app.js.p3'
 
 jobs:
   merge:
@@ -17,27 +17,24 @@ jobs:
         
       - name: Merge app.js parts
         run: |
-          # Check if both parts exist
-          if [ ! -f "static/app.js.part1" ] || [ ! -f "static/app.js.part2" ]; then
-            echo "Parts not found, skipping merge"
-            exit 0
+          if [ ! -f "static/app.js.p1" ] || [ ! -f "static/app.js.p2" ] || [ ! -f "static/app.js.p3" ]; then
+            echo "Parts not found"
+            ls static/app.js.p* 2>/dev/null || echo "No parts found"
+            exit 1
           fi
           
-          # Concatenate parts
-          cat static/app.js.part1 static/app.js.part2 > static/app.js
+          cat static/app.js.p1 static/app.js.p2 static/app.js.p3 > static/app.js
           
-          # Verify the size
           SIZE=$(wc -c < static/app.js)
           echo "Merged app.js size: $SIZE bytes"
           
-          # Remove temp files
-          rm static/app.js.part1 static/app.js.part2
+          rm static/app.js.p1 static/app.js.p2 static/app.js.p3
           
       - name: Commit merged file
         run: |
           git config user.name "GitHub Actions"
           git config user.email "actions@github.com"
           git add static/app.js
-          git rm --cached static/app.js.part1 static/app.js.part2 2>/dev/null || true
-          git commit -m "merge: combine app.js parts into full 160KB file" || echo "Nothing to commit"
+          git rm --cached static/app.js.p1 static/app.js.p2 static/app.js.p3 2>/dev/null || true
+          git commit -m "fix: merge full app.js (160KB) from 3 parts" || echo "Nothing to commit"
           git push
