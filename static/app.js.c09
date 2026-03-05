@@ -1,0 +1,189 @@
+y: { grid: { color: 'rgba(0,0,0,0.04)' }, ticks: { font: { size: 10 }, stepSize: 1 } },
+            },
+          },
+        });
+      }
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load agent ops</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  // ── AGENTS VIEW ────────────────────────
+  async function renderAgents(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const agents = await apiFetch('/api/agents');
+
+      if (agents.length === 0) {
+        container.innerHTML = `
+          <div class="page-header"><h1 class="page-title">My Agents</h1></div>
+          <div class="empty-state">
+            <div class="empty-state-icon"><i data-lucide="bot"></i></div>
+            <h3 class="empty-state-title">No agents yet</h3>
+            <p class="empty-state-desc">Create your first AI agent to automate tasks and get insights.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Create Agent</a>
+          </div>`;
+        lucide.createIcons();
+        return;
+      }
+
+      const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
+
+      container.innerHTML = `
+        <div class="page-header flex justify-between items-center">
+          <div>
+            <h1 class="page-title">My Agents</h1>
+            <p class="page-subtitle">${agents.length} agent${agents.length !== 1 ? 's' : ''}</p>
+          </div>
+          <a href="#/wizard" class="btn btn-primary"><i data-lucide="plus" style="width:16px;height:16px"></i> Create Agent</a>
+        </div>
+        <div class="grid-2" id="agents-grid">
+          ${agents.map(agent => `
+            <div class="agent-card" data-id="${agent.id}">
+              <div class="agent-card-head">
+                <div style="display:flex;align-items:center;gap:12px">
+                  <div class="agent-card-icon">${templateIcons[agent.template_id] || '<i data-lucide="settings" style="width:20px;height:20px"></i>'}</div>
+                  <div>
+                    <div class="agent-card-name">${escapeHtml(agent.name)}</div>
+                    <span class="badge badge-${agent.status}">${agent.status}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="agent-card-desc">${escapeHtml(agent.description || 'No description')}</div>
+              <div class="agent-card-meta">
+                <span><i data-lucide="cpu" style="width:12px;height:12px;display:inline"></i> ${agent.model || 'gpt-4o-mini'}</span>
+                <span>Last run: ${timeAgo(agent.last_run_at)}</span>
+              </div>
+              <div class="agent-card-actions">
+                <button class="btn btn-primary btn-sm agent-run-btn" data-id="${agent.id}" data-name="${escapeHtml(agent.name)}">
+                  <i data-lucide="play" style="width:12px;height:12px"></i> Run
+                </button>
+                <button class="btn btn-secondary btn-sm agent-toggle-btn" data-id="${agent.id}" data-status="${agent.status}">
+                  ${agent.status === 'active' ? 'Pause' : 'Resume'}
+                </button>
+                <a href="#/agent/${agent.id}" class="btn btn-ghost btn-sm">Details</a>
+                <button class="btn btn-ghost btn-sm agent-delete-btn" data-id="${agent.id}" data-name="${escapeHtml(agent.name)}" style="color:var(--color-error)">
+                  <i data-lucide="trash-2" style="width:12px;height:12px"></i>
+                </button>
+              </div>
+            </div>
+          `).join('')}
+        </div>`;
+
+      lucide.createIcons();
+      bindAgentActions();
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load agents</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  function bindAgentActions() {
+    document.querySelectorAll('.agent-run-btn').forEach(btn => {
+      btn.addEventListener('click', () => navigate(`#/agent/${btn.dataset.id}`));
+    });
+    document.querySelectorAll('.agent-toggle-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const newStatus = btn.dataset.status === 'active' ? 'paused' : 'active';
+        try {
+          await apiFetch(`/api/agents/${btn.dataset.id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ status: newStatus }),
+          });
+          toast(`Agent ${newStatus === 'active' ? 'resumed' : 'paused'}`, 'success');
+          renderAgents(document.getElementById('main-content'));
+        } catch (err) {
+          toast(err.message, 'error');
+        }
+      });
+    });
+    document.querySelectorAll('.agent-delete-btn').forEach(btn => {
+      btn.addEventListener('click', () => showDeleteModal(btn.dataset.id, btn.dataset.name));
+    });
+  }
+
+  // ── DELETE MODAL ───────────────────────
+  function showDeleteModal(agentId, agentName) {
+    const overlay = el('div', { className: 'modal-overlay' });
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:420px">
+        <div class="modal-header">
+          <h3 class="modal-title">Delete Agent</h3>
+          <button class="btn btn-ghost btn-icon close-modal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:13px;color:var(--color-text-secondary)">Are you sure you want to delete <strong>${escapeHtml(agentName)}</strong>? This action cannot be undone. All run history will be lost.</p>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary close-modal">Cancel</button>
+          <button class="btn btn-danger" id="confirm-delete">Delete Agent</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    lucide.createIcons({ nodes: [overlay] });
+
+    overlay.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('#confirm-delete').addEventListener('click', async () => {
+      try {
+        await apiFetch(`/api/agents/${agentId}`, { method: 'DELETE' });
+        overlay.remove();
+        toast('Agent deleted', 'success');
+        renderAgents(document.getElementById('main-content'));
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    });
+  }
+
+
+
+  // ── AGENT DETAIL VIEW (Tabbed Workspace) ──────────────
+  async function renderAgentDetail(container, agentId) {
+    const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
+    let activeTab = 'chat';
+    let agent = null;
+
+    // ── Render the full workspace skeleton ──
+    function renderWorkspace() {
+      const icon = templateIcons[agent.template_id] || '<i data-lucide="settings" style="width:20px;height:20px"></i>';
+      container.innerHTML = `
+        <div class="page-header flex justify-between items-center" style="margin-bottom:0;padding-bottom:12px">
+          <div style="display:flex;align-items:center;gap:12px">
+            <a href="#/agents" class="btn btn-ghost btn-sm"><i data-lucide="arrow-left" style="width:14px;height:14px"></i> Back</a>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span style="font-size:20px;line-height:1">${icon}</span>
+              <div>
+                <h1 class="page-title" style="margin:0;font-size:18px;line-height:1.2">${escapeHtml(agent.name)}</h1>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:2px">
+                  <span class="badge badge-${agent.status}">${agent.status}</span>
+                  <span class="text-xs text-muted">${agent.model || 'gpt-4o-mini'}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-primary btn-sm" id="workspace-run-btn">
+              <i data-lucide="message-square" style="width:14px;height:14px"></i> Chat
+            </button>
+          </div>
+        </div>
+
+        <div class="agent-tabs" id="agent-tab-bar">
+          <button class="agent-tab ${activeTab === 'chat' ? 'active' : ''}" data-tab="chat">Chat</button>
+          <button class="agent-tab ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">Activity</button>
+          <button class="agent-tab ${activeTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
+        </div>
+
+        <div id="agent-tab-content" style="background:var(--color-surface);border:1px solid var(--color-border);border-top:none;border-radius:0 0 10px 10px;overflow:hidden">
+          <div class="loading-center"><div class="loading-spinner"></div></div>
+        </div>
+      `;
+
+      lucide.createIcons();
+
+      // Tab click handlers
+      container.querySelectorAll('.agent-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          activeTab = tab.d
