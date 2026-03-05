@@ -11,6 +11,7 @@ import secrets
 import time
 import urllib.parse
 from contextlib import asynccontextmanager
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -2239,6 +2240,333 @@ async def join_waitlist(body: WaitlistRequest):
     except Exception as e:
         logger.error(f"waitlist error: {e}")
         raise HTTPException(status_code=500, detail="Failed to join waitlist")
+
+
+# ─────────────────────────────────────────────
+# COMMAND CENTER — Agentic SEO/AEO/GEO Dashboard
+# ─────────────────────────────────────────────
+
+@app.get("/api/command-center/overview")
+async def command_center_overview(user: dict = Depends(get_current_user)):
+    """Aggregate overview for the command center — pulls from connected services."""
+    user_id = user["id"]
+    try:
+        # Get all connections for this user
+        connections = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}"},
+        )
+        connected_services = {c["service"]: c for c in (connections or []) if c.get("is_active")}
+
+        # Get agent stats
+        agents = await sb_get(
+            "/rest/v1/agents",
+            params={"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,created_at"},
+        )
+
+        # Get recent runs for activity
+        recent_runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.desc",
+                "limit": "20",
+            },
+        )
+
+        # Calculate agent stats
+        total_agents = len(agents or [])
+        active_agents = sum(1 for a in (agents or []) if a.get("status") == "active")
+        total_runs = sum(a.get("total_runs", 0) or 0 for a in (agents or []))
+        total_tokens = sum(a.get("total_tokens_used", 0) or 0 for a in (agents or []))
+
+        # Aggregate run costs
+        total_cost = 0
+        for run in (recent_runs or []):
+            total_cost += run.get("cost_usd", 0) or 0
+
+        return {
+            "connected_services": list(connected_services.keys()),
+            "service_count": len(connected_services),
+            "agents": {
+                "total": total_agents,
+                "active": active_agents,
+                "total_runs": total_runs,
+                "total_tokens": total_tokens,
+            },
+            "recent_runs": [
+                {
+                    "id": r.get("id"),
+                    "agent_id": r.get("agent_id"),
+                    "status": r.get("status"),
+                    "model": r.get("model"),
+                    "total_tokens": r.get("total_tokens"),
+                    "cost_usd": r.get("cost_usd"),
+                    "duration_ms": r.get("duration_ms"),
+                    "started_at": r.get("started_at"),
+                    "completed_at": r.get("completed_at"),
+                    "input_preview": ((r.get("input_data") or {}).get("message", ""))[:100],
+                }
+                for r in (recent_runs or [])
+            ],
+            "cost_total_usd": round(total_cost, 6),
+        }
+    except Exception as e:
+        logger.error(f"command_center_overview error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch command center data")
+
+
+@app.get("/api/command-center/seo")
+async def command_center_seo(user: dict = Depends(get_current_user)):
+    """Fetch SEO metrics from connected Google Search Console."""
+    user_id = user["id"]
+    try:
+        # Check GSC connection
+        rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": "eq.google_search_console", "limit": "1"},
+        )
+        if not rows:
+            return {"connected": False, "message": "Google Search Console not connected"}
+
+        creds = rows[0].get("credentials", {})
+        access_token = creds.get("access_token")
+        if not access_token:
+            return {"connected": False, "message": "No access token available"}
+
+        # Get list of sites
+        async with httpx.AsyncClient(timeout=15) as client:
+            sites_r = await client.get(
+                "https://www.googleapis.com/webmasters/v3/sites",
+                headers={"Authorization": f"Bearer {access_token}"},
+            )
+            if sites_r.status_code == 401:
+                return {"connected": True, "expired": True, "message": "Token expired — reconnect Google Search Console"}
+            if sites_r.status_code != 200:
+                return {"connected": True, "error": True, "message": f"GSC returned {sites_r.status_code}"}
+
+            sites_data = sites_r.json()
+            sites = sites_data.get("siteEntry", [])
+
+            if not sites:
+                return {"connected": True, "sites": [], "message": "No sites found in GSC"}
+
+            # Query last 28 days for the first site
+            site_url = sites[0].get("siteUrl", "")
+            now = datetime.now(timezone.utc)
+            end_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+            start_date = (now - timedelta(days=28)).strftime("%Y-%m-%d")
+
+            search_r = await client.post(
+                f"https://www.googleapis.com/webmasters/v3/sites/{urllib.parse.quote(site_url, safe='')}/searchAnalytics/query",
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                json={
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "dimensions": ["date"],
+                    "rowLimit": 28,
+                },
+            )
+
+            daily_data = []
+            totals = {"clicks": 0, "impressions": 0, "ctr": 0, "position": 0}
+            if search_r.status_code == 200:
+                rows_data = search_r.json().get("rows", [])
+                for row in rows_data:
+                    daily_data.append({
+                        "date": row["keys"][0],
+                        "clicks": row.get("clicks", 0),
+                        "impressions": row.get("impressions", 0),
+                        "ctr": round(row.get("ctr", 0) * 100, 2),
+                        "position": round(row.get("position", 0), 1),
+                    })
+                    totals["clicks"] += row.get("clicks", 0)
+                    totals["impressions"] += row.get("impressions", 0)
+                if rows_data:
+                    totals["ctr"] = round((totals["clicks"] / max(totals["impressions"], 1)) * 100, 2)
+                    totals["position"] = round(sum(r.get("position", 0) for r in rows_data) / len(rows_data), 1)
+
+            # Also query top pages
+            pages_r = await client.post(
+                f"https://www.googleapis.com/webmasters/v3/sites/{urllib.parse.quote(site_url, safe='')}/searchAnalytics/query",
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                json={
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "dimensions": ["page"],
+                    "rowLimit": 10,
+                    "orderBy": [{"fieldName": "clicks", "sortOrder": "DESCENDING"}],
+                },
+            )
+            top_pages = []
+            if pages_r.status_code == 200:
+                for row in pages_r.json().get("rows", []):
+                    top_pages.append({
+                        "page": row["keys"][0],
+                        "clicks": row.get("clicks", 0),
+                        "impressions": row.get("impressions", 0),
+                        "ctr": round(row.get("ctr", 0) * 100, 2),
+                        "position": round(row.get("position", 0), 1),
+                    })
+
+            # Top queries
+            queries_r = await client.post(
+                f"https://www.googleapis.com/webmasters/v3/sites/{urllib.parse.quote(site_url, safe='')}/searchAnalytics/query",
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                json={
+                    "startDate": start_date,
+                    "endDate": end_date,
+                    "dimensions": ["query"],
+                    "rowLimit": 15,
+                    "orderBy": [{"fieldName": "clicks", "sortOrder": "DESCENDING"}],
+                },
+            )
+            top_queries = []
+            if queries_r.status_code == 200:
+                for row in queries_r.json().get("rows", []):
+                    top_queries.append({
+                        "query": row["keys"][0],
+                        "clicks": row.get("clicks", 0),
+                        "impressions": row.get("impressions", 0),
+                        "ctr": round(row.get("ctr", 0) * 100, 2),
+                        "position": round(row.get("position", 0), 1),
+                    })
+
+        return {
+            "connected": True,
+            "site_url": site_url,
+            "period": {"start": start_date, "end": end_date},
+            "totals": totals,
+            "daily": daily_data,
+            "top_pages": top_pages,
+            "top_queries": top_queries,
+        }
+    except Exception as e:
+        logger.error(f"command_center_seo error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch SEO data")
+
+
+@app.get("/api/command-center/analytics")
+async def command_center_analytics(user: dict = Depends(get_current_user)):
+    """Fetch traffic analytics from Google Analytics including LLM referral detection."""
+    user_id = user["id"]
+    try:
+        rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "service": "eq.google_analytics", "limit": "1"},
+        )
+        if not rows:
+            return {"connected": False, "message": "Google Analytics not connected"}
+
+        creds = rows[0].get("credentials", {})
+        access_token = creds.get("access_token")
+        if not access_token:
+            return {"connected": False, "message": "No access token available"}
+
+        # Note: GA4 requires property ID. We'll return connection status
+        # and instructions for setup since we'd need the property ID stored.
+        return {
+            "connected": True,
+            "message": "Google Analytics connected. Configure property ID in settings to enable LLM traffic tracking.",
+            "llm_referral_patterns": [
+                "chatgpt.com",
+                "chat.openai.com",
+                "perplexity.ai",
+                "claude.ai",
+                "gemini.google.com",
+                "copilot.microsoft.com",
+                "you.com",
+                "phind.com",
+            ],
+            "setup_instructions": "Create a GA4 segment filtering source containing any of the LLM referral patterns above to track AI-driven conversions.",
+        }
+    except Exception as e:
+        logger.error(f"command_center_analytics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch analytics data")
+
+
+@app.get("/api/command-center/agents-activity")
+async def command_center_agents_activity(user: dict = Depends(get_current_user)):
+    """Aggregate all agent interactions/activity for the command center."""
+    user_id = user["id"]
+    try:
+        agents = await sb_get(
+            "/rest/v1/agents",
+            params={"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,model"},
+        )
+
+        # Get last 50 runs across all agents
+        runs = await sb_get(
+            "/rest/v1/agent_runs",
+            params={
+                "user_id": f"eq.{user_id}",
+                "order": "started_at.desc",
+                "limit": "50",
+            },
+        )
+
+        # Build agent name map
+        agent_map = {a["id"]: a.get("name", "Unknown") for a in (agents or [])}
+
+        # Group by agent
+        agent_stats = {}
+        for a in (agents or []):
+            agent_stats[a["id"]] = {
+                "name": a.get("name"),
+                "status": a.get("status"),
+                "template_id": a.get("template_id"),
+                "model": a.get("model"),
+                "total_runs": a.get("total_runs", 0) or 0,
+                "total_tokens": a.get("total_tokens_used", 0) or 0,
+                "last_run_at": a.get("last_run_at"),
+            }
+
+        # Build activity timeline
+        timeline = []
+        for run in (runs or []):
+            agent_name = agent_map.get(run.get("agent_id"), "Unknown")
+            status = run.get("status", "unknown")
+            tokens = run.get("total_tokens", 0) or 0
+            cost = run.get("cost_usd", 0) or 0
+            input_preview = ((run.get("input_data") or {}).get("message", ""))[:120]
+            output_preview = ((run.get("output_data") or {}).get("response", ""))[:120]
+
+            timeline.append({
+                "run_id": run.get("id"),
+                "agent_id": run.get("agent_id"),
+                "agent_name": agent_name,
+                "status": status,
+                "model": run.get("model"),
+                "tokens": tokens,
+                "cost_usd": cost,
+                "duration_ms": run.get("duration_ms"),
+                "input_preview": input_preview,
+                "output_preview": output_preview,
+                "started_at": run.get("started_at"),
+                "completed_at": run.get("completed_at"),
+            })
+
+        # Daily aggregation for chart (last 14 days)
+        daily_runs = defaultdict(lambda: {"runs": 0, "tokens": 0, "cost": 0})
+        for run in (runs or []):
+            date_str = (run.get("started_at") or "")[:10]
+            if date_str:
+                daily_runs[date_str]["runs"] += 1
+                daily_runs[date_str]["tokens"] += run.get("total_tokens", 0) or 0
+                daily_runs[date_str]["cost"] += run.get("cost_usd", 0) or 0
+
+        daily_chart = sorted([
+            {"date": k, **v} for k, v in daily_runs.items()
+        ], key=lambda x: x["date"])
+
+        return {
+            "agents": agent_stats,
+            "timeline": timeline,
+            "daily_chart": daily_chart,
+        }
+    except Exception as e:
+        logger.error(f"command_center_agents_activity error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to fetch agent activity data")
 
 
 # ─────────────────────────────────────────────
