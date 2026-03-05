@@ -1,0 +1,166 @@
+,
+            }),
+          });
+          // Success animation
+          container.innerHTML = `
+            <div class="success-anim">
+              <div class="success-check"><i data-lucide="check" style="width:32px;height:32px"></i></div>
+              <h2 class="success-title">Agent Deployed!</h2>
+              <p class="success-desc">"${escapeHtml(wizardData.name)}" is now active and ready to run.</p>
+              <div style="display:flex;gap:8px">
+                <a href="#/agents" class="btn btn-primary">View My Agents</a>
+                <button class="btn btn-secondary" onclick="window.NC.resetWizard()">Create Another</button>
+              </div>
+            </div>`;
+          lucide.createIcons();
+          toast('Agent deployed successfully!', 'success');
+          // Reset wizard state
+          wizardStep = 0;
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+          return;
+        } catch (err) {
+          toast(err.message, 'error');
+          btn.disabled = false;
+          btn.innerHTML = 'Deploy Agent <i data-lucide="arrow-right" style="width:14px;height:14px"></i>';
+          lucide.createIcons({ nodes: [btn] });
+          return;
+        }
+    }
+
+    if (wizardStep < 7) {
+      wizardStep++;
+      renderWizard(container);
+    }
+  }
+
+  // ── TEMPLATES VIEW ───────────────────────
+  async function renderTemplates(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const templates = await apiFetch('/api/templates');
+      container.innerHTML = `
+        <div class="page-header">
+          <h1 class="page-title">Templates</h1>
+          <p class="page-subtitle">Pre-built agent configurations to get started fast</p>
+        </div>
+        <div class="grid-3">
+          ${templates.map(t => `
+            <div class="template-card" data-id="${t.id}">
+              <div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>
+              <div class="template-card-name">${escapeHtml(t.name)}</div>
+              <div class="template-card-desc">${escapeHtml(t.description)}</div>
+              <div class="template-card-tags" style="margin-bottom:12px">
+                ${t.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
+              </div>
+              <button class="btn btn-primary btn-sm use-template-btn" data-id="${t.id}">Use Template</button>
+            </div>
+          `).join('')}
+        </div>`;
+
+      lucide.createIcons();
+
+      document.querySelectorAll('.use-template-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          wizardStep = 0;
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+          wizardData.template_id = btn.dataset.id;
+          wizardData.templateObj = templates.find(t => t.id === btn.dataset.id);
+          if (wizardData.templateObj) {
+            wizardData.goals = [...wizardData.templateObj.default_goals];
+          }
+          wizardStep = 1; // Skip template selection since we already chose
+          navigate('#/wizard');
+        });
+      });
+    } catch (err) {
+      container.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load templates</h3></div>`;
+      toast(err.message, 'error');
+    }
+  }
+
+  // ── CONNECTIONS VIEW ─────────────────────
+  async function renderConnections(container) {
+    container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+
+    const serviceCategories = [
+      {
+        label: 'Data Sources',
+        description: 'Connect analytics and search platforms for your agents to read',
+        services: [
+          { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
+          { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
+          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '<i data-lucide="globe" style="width:20px;height:20px;color:#00809d"></i>', desc: 'Bing search data, crawl stats, SEO issues', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'From Bing Webmaster → Settings → API Access'}] },
+          { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '<i data-lucide="flame" style="width:20px;height:20px;color:#ff6f00"></i>', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
+          { id: 'cloudflare', name: 'Cloudflare', icon: '<i data-lucide="cloud" style="width:20px;height:20px;color:#f38020"></i>', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
+        ]
+      },
+      {
+        label: 'AI Models',
+        description: 'Configure AI model access for agent intelligence',
+        services: [
+          { id: 'openai', name: 'OpenAI', icon: '<i data-lucide="brain" style="width:20px;height:20px;color:#10a37f"></i>', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
+          { id: 'google_gemini', name: 'Google Gemini', icon: '<i data-lucide="sparkles" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
+          { id: 'nano_banana', name: 'Nano Banana', icon: '<i data-lucide="image" style="width:20px;height:20px;color:#f5c842"></i>', desc: 'Image generation and creative AI', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Nano Banana API key'}] },
+        ]
+      },
+      {
+        label: 'Deployment',
+        description: 'Push code and manage infrastructure',
+        services: [
+          { id: 'github', name: 'GitHub', icon: '<i data-lucide="github" style="width:20px;height:20px;color:#24292f"></i>', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
+        ]
+      },
+      {
+        label: 'Social Publishing',
+        description: 'Post and schedule content across social platforms',
+        services: [
+          { id: 'twitter', name: 'X (Twitter)', icon: '<i data-lucide="at-sign" style="width:20px;height:20px;color:#1d9bf0"></i>', desc: 'Post tweets, threads, and media', auth: 'oauth' },
+          { id: 'facebook', name: 'Facebook', icon: '<i data-lucide="thumbs-up" style="width:20px;height:20px;color:#1877f2"></i>', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
+          { id: 'instagram', name: 'Instagram', icon: '<i data-lucide="camera" style="width:20px;height:20px;color:#e4405f"></i>', desc: 'Publish posts and stories', auth: 'oauth' },
+          { id: 'tiktok', name: 'TikTok', icon: '<i data-lucide="music" style="width:20px;height:20px;color:#25f4ee"></i>', desc: 'Upload videos and manage content', auth: 'oauth' },
+        ]
+      }
+    ];
+
+    try {
+      const connections = await apiFetch('/api/connections');
+      const connectedMap = {};
+      connections.forEach(c => { connectedMap[c.service] = c; });
+
+      let html = `
+        <div class="page-header">
+          <h1 class="page-title">Connections</h1>
+          <p class="page-subtitle">Connect services for your agents to read data, think, and act</p>
+        </div>`;
+
+      serviceCategories.forEach(cat => {
+        html += `
+          <div class="connections-category" style="margin-bottom:var(--space-8)">
+            <div style="margin-bottom:16px">
+              <h2 style="font-size:18px;font-weight:700;margin:0 0 4px 0">${cat.label}</h2>
+              <p class="text-sm text-muted" style="margin:0">${cat.description}</p>
+            </div>
+            <div class="grid-2">
+              ${cat.services.map(s => {
+                const conn = connectedMap[s.id];
+                const isConnected = !!conn && conn.is_active;
+                const testedAt = conn?.last_tested_at ? timeAgo(conn.last_tested_at) : null;
+                const badgeHtml = s.badge ? `<span class="badge badge-active" style="font-size:10px;margin-left:6px">${s.badge}</span>` : '';
+                return `
+                <div class="connection-card ${isConnected ? 'connection-card-connected' : ''}">
+                  <div class="connection-icon">${s.icon}</div>
+                  <div class="connection-info">
+                    <div class="connection-name">${s.name}${badgeHtml}</div>
+                    <div class="connection-status">
+                      <span class="connection-status-dot ${isConnected ? 'connected' : ''}"></span>
+                      <span>${isConnected ? 'Connected' : 'Not connected'}</span>
+                      ${testedAt ? `<span class="text-xs text-muted" style="margin-left:8px">Tested ${testedAt}</span>` : ''}
+                    </div>
+                    <div class="text-xs text-muted" style="margin-top:2px">${s.desc}</div>
+                  </div>
+                  <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;margin-left:12px">
+                    ${isConnected ? `
+                      <button class="btn btn-ghost btn-sm test-conn-btn" data-service="${s.id}" data-name="${s.name}" title="Test connection">
+                        <i data-lucide="activity" style="width:14px;height:14px"></i>
+                      </button>
+                      <button class="btn btn-secondary btn-sm disconnect-btn" data-service="${s.i
