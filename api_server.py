@@ -727,6 +727,45 @@ def _apply_scope_to_tool_args(tool_name: str, tool_args: dict, scope: dict) -> d
     return args
 
 
+async def _resolve_command_center_scope(
+    user_id: str,
+    scope_mode: str = "site",
+    agent_id: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    gsc_site: Optional[str] = None,
+    bing_site: Optional[str] = None,
+) -> dict:
+    """Resolve command-center scope from agent/site selection."""
+    mode = (scope_mode or "site").strip().lower()
+    resolved = {
+        "mode": mode if mode in ("agent", "site") else "site",
+        "agent_id": None,
+        "agent_name": None,
+        "github_repo": (github_repo or "").strip(),
+        "gsc_site": (gsc_site or "").strip(),
+        "bing_site": (bing_site or "").strip(),
+    }
+
+    if resolved["mode"] == "agent" and agent_id:
+        rows = await sb_get(
+            "/rest/v1/agents",
+            params={"id": f"eq.{agent_id}", "user_id": f"eq.{user_id}", "limit": "1"},
+        )
+        if rows:
+            agent = rows[0]
+            resolved["agent_id"] = agent.get("id")
+            resolved["agent_name"] = agent.get("name")
+            agent_scope = _extract_data_scope(agent.get("rules"))
+            if not resolved["github_repo"]:
+                resolved["github_repo"] = agent_scope.get("github_repo", "")
+            if not resolved["gsc_site"]:
+                resolved["gsc_site"] = agent_scope.get("gsc_site", "")
+            if not resolved["bing_site"]:
+                resolved["bing_site"] = agent_scope.get("bing_site", "")
+
+    return resolved
+
+
 class AgentRunRequest(BaseModel):
     input_data: dict  # must contain "message" key
 
@@ -2817,10 +2856,26 @@ async def join_waitlist(body: WaitlistRequest):
 # ─────────────────────────────────────────────
 
 @app.get("/api/command-center/overview")
-async def command_center_overview(user: dict = Depends(get_current_user)):
+async def command_center_overview(
+    scope_mode: str = "site",
+    agent_id: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    gsc_site: Optional[str] = None,
+    bing_site: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
     """Aggregate overview for the command center — pulls from connected services."""
     user_id = user["id"]
     try:
+        scope = await _resolve_command_center_scope(
+            user_id=user_id,
+            scope_mode=scope_mode,
+            agent_id=agent_id,
+            github_repo=github_repo,
+            gsc_site=gsc_site,
+            bing_site=bing_site,
+        )
+
         # Get all connections for this user
         connections = await sb_get(
             "/rest/v1/connections",
@@ -2828,21 +2883,17 @@ async def command_center_overview(user: dict = Depends(get_current_user)):
         )
         connected_services = {c["service"]: c for c in (connections or []) if c.get("is_active")}
 
-        # Get agent stats
-        agents = await sb_get(
-            "/rest/v1/agents",
-            params={"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,created_at"},
-        )
+        # Get agent stats (optionally narrowed to one selected agent)
+        agent_params = {"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,created_at"}
+        if scope["mode"] == "agent" and scope.get("agent_id"):
+            agent_params["id"] = f"eq.{scope['agent_id']}"
+        agents = await sb_get("/rest/v1/agents", params=agent_params)
 
-        # Get recent runs for activity
-        recent_runs = await sb_get(
-            "/rest/v1/agent_runs",
-            params={
-                "user_id": f"eq.{user_id}",
-                "order": "started_at.desc",
-                "limit": "20",
-            },
-        )
+        # Get recent runs for activity (optionally narrowed to one selected agent)
+        run_params = {"user_id": f"eq.{user_id}", "order": "started_at.desc", "limit": "20"}
+        if scope["mode"] == "agent" and scope.get("agent_id"):
+            run_params["agent_id"] = f"eq.{scope['agent_id']}"
+        recent_runs = await sb_get("/rest/v1/agent_runs", params=run_params)
 
         # Calculate agent stats
         total_agents = len(agents or [])
@@ -2856,6 +2907,7 @@ async def command_center_overview(user: dict = Depends(get_current_user)):
             total_cost += run.get("cost_usd", 0) or 0
 
         return {
+            "scope": scope,
             "connected_services": list(connected_services.keys()),
             "service_count": len(connected_services),
             "agents": {
@@ -2887,10 +2939,26 @@ async def command_center_overview(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/command-center/seo")
-async def command_center_seo(user: dict = Depends(get_current_user)):
+async def command_center_seo(
+    scope_mode: str = "site",
+    agent_id: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    gsc_site: Optional[str] = None,
+    bing_site: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
     """Fetch SEO metrics from connected Google Search Console."""
     user_id = user["id"]
     try:
+        scope = await _resolve_command_center_scope(
+            user_id=user_id,
+            scope_mode=scope_mode,
+            agent_id=agent_id,
+            github_repo=github_repo,
+            gsc_site=gsc_site,
+            bing_site=bing_site,
+        )
+
         # Check GSC connection
         rows = await sb_get(
             "/rest/v1/connections",
@@ -2919,10 +2987,14 @@ async def command_center_seo(user: dict = Depends(get_current_user)):
             sites = sites_data.get("siteEntry", [])
 
             if not sites:
-                return {"connected": True, "sites": [], "message": "No sites found in GSC"}
+                return {"connected": True, "sites": [], "message": "No sites found in GSC", "scope": scope}
 
-            # Query last 28 days for the first site
-            site_url = sites[0].get("siteUrl", "")
+            # Query last 28 days for scoped site if provided, otherwise first site.
+            available_sites = [s.get("siteUrl", "") for s in sites if s.get("siteUrl")]
+            scoped_site = (scope.get("gsc_site") or "").strip()
+            site_url = scoped_site if scoped_site and scoped_site in available_sites else (available_sites[0] if available_sites else "")
+            if not site_url:
+                return {"connected": True, "sites": [], "message": "No accessible sites found in GSC", "scope": scope}
             now = datetime.now(timezone.utc)
             end_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
             start_date = (now - timedelta(days=28)).strftime("%Y-%m-%d")
@@ -3003,6 +3075,7 @@ async def command_center_seo(user: dict = Depends(get_current_user)):
                     })
 
         return {
+            "scope": scope,
             "connected": True,
             "site_url": site_url,
             "period": {"start": start_date, "end": end_date},
@@ -3056,23 +3129,42 @@ async def command_center_analytics(user: dict = Depends(get_current_user)):
 
 
 @app.get("/api/command-center/agents-activity")
-async def command_center_agents_activity(user: dict = Depends(get_current_user)):
+async def command_center_agents_activity(
+    scope_mode: str = "site",
+    agent_id: Optional[str] = None,
+    github_repo: Optional[str] = None,
+    gsc_site: Optional[str] = None,
+    bing_site: Optional[str] = None,
+    user: dict = Depends(get_current_user),
+):
     """Aggregate all agent interactions/activity for the command center."""
     user_id = user["id"]
     try:
+        scope = await _resolve_command_center_scope(
+            user_id=user_id,
+            scope_mode=scope_mode,
+            agent_id=agent_id,
+            github_repo=github_repo,
+            gsc_site=gsc_site,
+            bing_site=bing_site,
+        )
+        scoped_agent_id = scope.get("agent_id") if scope.get("mode") == "agent" else None
+
+        agent_params = {"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,model"}
+        if scoped_agent_id:
+            agent_params["id"] = f"eq.{scoped_agent_id}"
         agents = await sb_get(
             "/rest/v1/agents",
-            params={"user_id": f"eq.{user_id}", "select": "id,name,status,template_id,total_runs,total_tokens_used,last_run_at,model"},
+            params=agent_params,
         )
 
         # Get last 50 runs across all agents
+        run_params = {"user_id": f"eq.{user_id}", "order": "started_at.desc", "limit": "50"}
+        if scoped_agent_id:
+            run_params["agent_id"] = f"eq.{scoped_agent_id}"
         runs = await sb_get(
             "/rest/v1/agent_runs",
-            params={
-                "user_id": f"eq.{user_id}",
-                "order": "started_at.desc",
-                "limit": "50",
-            },
+            params=run_params,
         )
 
         # Build agent name map
@@ -3130,6 +3222,7 @@ async def command_center_agents_activity(user: dict = Depends(get_current_user))
         ], key=lambda x: x["date"])
 
         return {
+            "scope": scope,
             "agents": agent_stats,
             "timeline": timeline,
             "daily_chart": daily_chart,

@@ -579,8 +579,53 @@
   // ── COMMAND CENTER ────────────────────────
   let ccActiveTab = 'overview';
   let ccCharts = {};
+  let ccScope = (() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('nc_cc_scope') || '{}');
+      return {
+        mode: saved.mode === 'agent' ? 'agent' : 'site',
+        agent_id: saved.agent_id || '',
+        github_repo: saved.github_repo || '',
+        gsc_site: saved.gsc_site || '',
+        bing_site: saved.bing_site || '',
+      };
+    } catch {
+      return { mode: 'site', agent_id: '', github_repo: '', gsc_site: '', bing_site: '' };
+    }
+  })();
+
+  function saveCCScope() {
+    try { localStorage.setItem('nc_cc_scope', JSON.stringify(ccScope)); } catch {}
+  }
+
+  function getCCScopeQuery() {
+    const p = new URLSearchParams();
+    p.set('scope_mode', ccScope.mode || 'site');
+    if (ccScope.mode === 'agent' && ccScope.agent_id) p.set('agent_id', ccScope.agent_id);
+    if (ccScope.mode === 'site') {
+      if (ccScope.github_repo) p.set('github_repo', ccScope.github_repo);
+      if (ccScope.gsc_site) p.set('gsc_site', ccScope.gsc_site);
+      if (ccScope.bing_site) p.set('bing_site', ccScope.bing_site);
+    }
+    return p.toString() ? `?${p.toString()}` : '';
+  }
 
   async function renderCommandCenter(container) {
+    let scopeAgents = [];
+    let scopeOptions = { github_repos: [], gsc_sites: [], bing_sites: [] };
+    try {
+      const [agentsRes, optionsRes] = await Promise.all([
+        apiFetch('/api/agents'),
+        loadScopeOptions(),
+      ]);
+      scopeAgents = agentsRes || [];
+      scopeOptions = optionsRes || scopeOptions;
+    } catch {}
+
+    if (ccScope.mode === 'agent' && ccScope.agent_id && !scopeAgents.some(a => a.id === ccScope.agent_id)) {
+      ccScope.agent_id = '';
+    }
+
     const tabs = [
       { id: 'overview', label: 'Overview', icon: 'gauge' },
       { id: 'seo', label: 'SEO Metrics', icon: 'search' },
@@ -602,6 +647,32 @@
           </div>
         </div>
       </div>
+      <div class="card" style="margin-bottom:12px;padding:12px">
+        <div style="display:grid;grid-template-columns:180px 1fr 1fr 1fr;gap:8px;align-items:end">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Scope Mode</label>
+            <select class="form-select" id="cc-scope-mode">
+              <option value="site" ${ccScope.mode === 'site' ? 'selected' : ''}>Site Scope</option>
+              <option value="agent" ${ccScope.mode === 'agent' ? 'selected' : ''}>Agent Scope</option>
+            </select>
+          </div>
+          <div class="form-group" id="cc-scope-agent-wrap" style="margin:0;${ccScope.mode === 'agent' ? '' : 'display:none'}">
+            <label class="form-label">Agent</label>
+            <select class="form-select" id="cc-scope-agent">
+              <option value="">Select agent</option>
+              ${scopeAgents.map(a => `<option value="${a.id}" ${a.id === ccScope.agent_id ? 'selected' : ''}>${escapeHtml(a.name || 'Unnamed Agent')}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" id="cc-scope-site-wrap" style="margin:0;${ccScope.mode === 'site' ? '' : 'display:none'}">
+            <label class="form-label">GSC Property</label>
+            <input class="form-input" id="cc-scope-gsc-manual" value="${escapeHtml(ccScope.gsc_site || '')}" placeholder="https://example.com/ or sc-domain:example.com">
+          </div>
+          <div class="form-group" id="cc-scope-repo-wrap" style="margin:0;${ccScope.mode === 'site' ? '' : 'display:none'}">
+            <label class="form-label">GitHub Repo</label>
+            <input class="form-input" id="cc-scope-repo-manual" value="${escapeHtml(ccScope.github_repo || '')}" placeholder="owner/repo">
+          </div>
+        </div>
+      </div>
       <div class="cc-tabs">
         ${tabs.map(t => `
           <button class="cc-tab ${ccActiveTab === t.id ? 'cc-tab-active' : ''}" data-tab="${t.id}">
@@ -612,6 +683,40 @@
       </div>
       <div id="cc-content" class="cc-content"></div>
     `;
+
+    const modeSel = document.getElementById('cc-scope-mode');
+    const agentSel = document.getElementById('cc-scope-agent');
+    const gscManual = document.getElementById('cc-scope-gsc-manual');
+    const repoManual = document.getElementById('cc-scope-repo-manual');
+    const agentWrap = document.getElementById('cc-scope-agent-wrap');
+    const siteWrap = document.getElementById('cc-scope-site-wrap');
+    const repoWrap = document.getElementById('cc-scope-repo-wrap');
+
+    modeSel?.addEventListener('change', () => {
+      ccScope.mode = modeSel.value === 'agent' ? 'agent' : 'site';
+      saveCCScope();
+      renderCommandCenter(container);
+    });
+    agentSel?.addEventListener('change', () => {
+      ccScope.agent_id = agentSel.value || '';
+      saveCCScope();
+      renderCommandCenter(container);
+    });
+    gscManual?.addEventListener('change', () => {
+      ccScope.gsc_site = (gscManual.value || '').trim();
+      saveCCScope();
+      renderCommandCenter(container);
+    });
+    repoManual?.addEventListener('change', () => {
+      ccScope.github_repo = (repoManual.value || '').trim();
+      saveCCScope();
+      renderCommandCenter(container);
+    });
+    if (agentWrap && siteWrap && repoWrap) {
+      agentWrap.style.display = ccScope.mode === 'agent' ? '' : 'none';
+      siteWrap.style.display = ccScope.mode === 'site' ? '' : 'none';
+      repoWrap.style.display = ccScope.mode === 'site' ? '' : 'none';
+    }
 
     // Bind tab clicks
     container.querySelectorAll('.cc-tab').forEach(btn => {
@@ -640,7 +745,7 @@
   async function renderCCOverview(el) {
     el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      const data = await apiFetch('/api/command-center/overview');
+      const data = await apiFetch(`/api/command-center/overview${getCCScopeQuery()}`);
       el.innerHTML = `
         <div class="cc-kpi-grid">
           <div class="cc-kpi">
@@ -726,7 +831,7 @@
   async function renderCCSEO(el) {
     el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      const data = await apiFetch('/api/command-center/seo');
+      const data = await apiFetch(`/api/command-center/seo${getCCScopeQuery()}`);
       if (!data.connected) {
         el.innerHTML = `
           <div class="cc-empty-card">
@@ -1538,7 +1643,7 @@
   async function renderCCAgentOps(el) {
     el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      const data = await apiFetch('/api/command-center/agents-activity');
+      const data = await apiFetch(`/api/command-center/agents-activity${getCCScopeQuery()}`);
       const agents = Object.entries(data.agents || {});
       const timeline = data.timeline || [];
       const dailyChart = data.daily_chart || [];
