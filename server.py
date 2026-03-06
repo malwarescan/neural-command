@@ -41,14 +41,16 @@ def _write_if_newer(blob_module: str, target_path: pathlib.Path, label: str):
     except Exception as e:
         logger.warning(f"reconstitute: could not write {label}: {e}")
 
-# Reconstitute agent_tools.py (new file, needed by api_server.py)
-_write_if_newer("agent_tools_blob", _BASE / "agent_tools.py", "agent_tools.py")
-
-# Reconstitute api_server.py (main backend)
-_write_if_newer("api_server_blob", _BASE / "api_server.py", "api_server.py")
-
-# Reconstitute app.js (frontend SPA)
-_write_if_newer("app_js_blob", _BASE / "static" / "app.js", "static/app.js")
+# Reconstitution is now opt-in only.
+# Default behavior uses repository source files directly so production
+# reflects committed app/api changes instead of stale blob snapshots.
+_ENABLE_BLOB_RECONSTITUTE = os.getenv("ENABLE_BLOB_RECONSTITUTE", "").strip().lower() in {"1", "true", "yes"}
+if _ENABLE_BLOB_RECONSTITUTE:
+    _write_if_newer("agent_tools_blob", _BASE / "agent_tools.py", "agent_tools.py")
+    _write_if_newer("api_server_blob", _BASE / "api_server.py", "api_server.py")
+    _write_if_newer("app_js_blob", _BASE / "static" / "app.js", "static/app.js")
+else:
+    logger.info("reconstitute: skipped blob restore (ENABLE_BLOB_RECONSTITUTE not enabled)")
 
 # Force Python to re-discover reconstituted modules
 if "agent_tools" in sys.modules:
