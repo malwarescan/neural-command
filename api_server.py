@@ -1089,9 +1089,12 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
         conn_rows = []
 
     tokens: dict[str, str] = {}
+    credentials_by_service: dict[str, dict] = {}
     for conn in (conn_rows or []):
         svc_name = conn.get("service", "")
         creds = conn.get("credentials", {}) or {}
+        if svc_name:
+            credentials_by_service[svc_name] = creds
         token = creds.get("access_token") or creds.get("api_key") or ""
         if svc_name and token:
             tokens[svc_name] = token
@@ -1137,6 +1140,16 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
                     "https://ssl.bing.com/webmaster/api.svc/json/GetUserSites",
                     headers={"Authorization": f"Bearer {bing_token}"},
                 )
+                # Backward compatibility: legacy Bing API-key connections
+                # used api_key credentials, not OAuth bearer tokens.
+                if r.status_code in (401, 403):
+                    bing_creds = credentials_by_service.get("bing_webmaster", {}) or {}
+                    bing_api_key = (bing_creds.get("api_key") or "").strip()
+                    if bing_api_key:
+                        r = await client.get(
+                            "https://ssl.bing.com/webmaster/api.svc/json/GetUserSites",
+                            params={"apikey": bing_api_key},
+                        )
                 if r.status_code == 200:
                     payload = r.json() or {}
                     candidate_sites = []
@@ -1144,8 +1157,16 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
                         d = payload.get("d") or {}
                         candidate_sites.extend(d.get("Results") or [])
                         candidate_sites.extend(d.get("results") or [])
+                    if isinstance(payload.get("d"), list):
+                        candidate_sites.extend(payload.get("d") or [])
                     if isinstance(payload.get("sites"), list):
                         candidate_sites.extend(payload.get("sites") or [])
+                    if isinstance(payload.get("Sites"), list):
+                        candidate_sites.extend(payload.get("Sites") or [])
+                    if isinstance(payload.get("results"), list):
+                        candidate_sites.extend(payload.get("results") or [])
+                    if isinstance(payload.get("Result"), list):
+                        candidate_sites.extend(payload.get("Result") or [])
                     for entry in candidate_sites:
                         if isinstance(entry, str) and entry:
                             bing_sites.append(entry)
