@@ -2563,6 +2563,7 @@
         const repoOptions = options.github_repos || [];
         const gscOptions = options.gsc_sites || [];
         const bingOptions = options.bing_sites || [];
+        const diagnostics = options.diagnostics || {};
 
         repoSel.innerHTML = `<option value="">Any connected repository</option>${repoOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
         gscSel.innerHTML = `<option value="">Any connected GSC property</option>${gscOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
@@ -2573,10 +2574,18 @@
         bingSel.value = wizardData.data_scope?.bing_site || '';
 
         if (loadingEl) {
+          const ghDiag = diagnostics.github?.detail || 'No diagnostics';
+          const gscDiag = diagnostics.google_search_console?.detail || 'No diagnostics';
+          const bingDiag = diagnostics.bing_webmaster?.detail || 'No diagnostics';
           loadingEl.innerHTML = `
             <div class="text-sm">
               <strong>Available sources:</strong>
               ${repoOptions.length} repos · ${gscOptions.length} GSC properties · ${bingOptions.length} Bing properties
+            </div>
+            <div class="text-xs text-muted" style="margin-top:6px">
+              GitHub: ${escapeHtml(ghDiag)}<br>
+              GSC: ${escapeHtml(gscDiag)}<br>
+              Bing: ${escapeHtml(bingDiag)}
             </div>
           `;
         }

@@ -1078,6 +1078,11 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
     github_repos: list[str] = []
     gsc_sites: list[str] = []
     bing_sites: list[str] = []
+    diagnostics = {
+        "github": {"connected": False, "status": "not_connected", "detail": "No active connection"},
+        "google_search_console": {"connected": False, "status": "not_connected", "detail": "No active connection"},
+        "bing_webmaster": {"connected": False, "status": "not_connected", "detail": "No active connection"},
+    }
 
     try:
         conn_rows = await sb_get(
@@ -1098,6 +1103,8 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
         token = creds.get("access_token") or creds.get("api_key") or ""
         if svc_name and token:
             tokens[svc_name] = token
+            if svc_name in diagnostics:
+                diagnostics[svc_name] = {"connected": True, "status": "connected", "detail": "Connected"}
 
     async with httpx.AsyncClient(timeout=20) as client:
         gh_token = tokens.get("github")
@@ -1116,8 +1123,24 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
                     github_repos = sorted(
                         [repo.get("full_name", "") for repo in (r.json() or []) if repo.get("full_name")]
                     )
+                    diagnostics["github"] = {
+                        "connected": True,
+                        "status": "ok",
+                        "detail": f"Loaded {len(github_repos)} repositories",
+                    }
+                else:
+                    diagnostics["github"] = {
+                        "connected": True,
+                        "status": "api_error",
+                        "detail": f"GitHub API returned {r.status_code}",
+                    }
             except Exception as e:
                 logger.warning(f"get_agent_scope_options: github fetch failed: {e}")
+                diagnostics["github"] = {
+                    "connected": True,
+                    "status": "error",
+                    "detail": f"GitHub lookup failed: {str(e)[:120]}",
+                }
 
         gsc_token = tokens.get("google_search_console")
         if gsc_token:
@@ -1130,8 +1153,24 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
                     gsc_sites = sorted(
                         [site.get("siteUrl", "") for site in (r.json().get("siteEntry") or []) if site.get("siteUrl")]
                     )
+                    diagnostics["google_search_console"] = {
+                        "connected": True,
+                        "status": "ok",
+                        "detail": f"Loaded {len(gsc_sites)} properties",
+                    }
+                else:
+                    diagnostics["google_search_console"] = {
+                        "connected": True,
+                        "status": "api_error",
+                        "detail": f"GSC API returned {r.status_code}",
+                    }
             except Exception as e:
                 logger.warning(f"get_agent_scope_options: gsc fetch failed: {e}")
+                diagnostics["google_search_console"] = {
+                    "connected": True,
+                    "status": "error",
+                    "detail": f"GSC lookup failed: {str(e)[:120]}",
+                }
 
         bing_token = tokens.get("bing_webmaster")
         if bing_token:
@@ -1175,13 +1214,30 @@ async def get_agent_scope_options(user: dict = Depends(get_current_user)):
                             if site_url:
                                 bing_sites.append(site_url)
                     bing_sites = sorted(list(set(bing_sites)))
+                    diagnostics["bing_webmaster"] = {
+                        "connected": True,
+                        "status": "ok",
+                        "detail": f"Loaded {len(bing_sites)} properties",
+                    }
+                else:
+                    diagnostics["bing_webmaster"] = {
+                        "connected": True,
+                        "status": "api_error",
+                        "detail": f"Bing API returned {r.status_code}",
+                    }
             except Exception as e:
                 logger.warning(f"get_agent_scope_options: bing fetch failed: {e}")
+                diagnostics["bing_webmaster"] = {
+                    "connected": True,
+                    "status": "error",
+                    "detail": f"Bing lookup failed: {str(e)[:120]}",
+                }
 
     return {
         "github_repos": github_repos,
         "gsc_sites": gsc_sites,
         "bing_sites": bing_sites,
+        "diagnostics": diagnostics,
     }
 
 
