@@ -2185,6 +2185,11 @@
                   <option value="">Any connected Bing property</option>
                 </select>
               </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+                <input type="text" class="form-input scope-field" data-scope-field="github_repo" id="agent-scope-repo-manual" placeholder="owner/repo" value="${escapeHtml(agentScope.github_repo || '')}">
+                <input type="text" class="form-input scope-field" data-scope-field="gsc_site" id="agent-scope-gsc-manual" placeholder="https://example.com/ or sc-domain:example.com" value="${escapeHtml(agentScope.gsc_site || '')}">
+                <input type="text" class="form-input scope-field" data-scope-field="bing_site" id="agent-scope-bing-manual" placeholder="https://example.com/" value="${escapeHtml(agentScope.bing_site || '')}">
+              </div>
             </div>
           </div>
 
@@ -2240,6 +2245,12 @@
           repoSel.value = agentScope.github_repo || '';
           gscSel.value = agentScope.gsc_site || '';
           bingSel.value = agentScope.bing_site || '';
+          const repoManual = document.getElementById('agent-scope-repo-manual');
+          const gscManual = document.getElementById('agent-scope-gsc-manual');
+          const bingManual = document.getElementById('agent-scope-bing-manual');
+          if (repoManual) repoManual.value = agentScope.github_repo || '';
+          if (gscManual) gscManual.value = agentScope.gsc_site || '';
+          if (bingManual) bingManual.value = agentScope.bing_site || '';
         } catch (err) {
           // keep empty defaults if options fetch fails
         }
@@ -2260,9 +2271,9 @@
           updateData[key] = val;
         });
         const data_scope = {
-          github_repo: document.getElementById('agent-scope-repo')?.value || '',
-          gsc_site: document.getElementById('agent-scope-gsc')?.value || '',
-          bing_site: document.getElementById('agent-scope-bing')?.value || '',
+          github_repo: (document.getElementById('agent-scope-repo')?.value || '').trim() || (document.getElementById('agent-scope-repo-manual')?.value || '').trim(),
+          gsc_site: (document.getElementById('agent-scope-gsc')?.value || '').trim() || (document.getElementById('agent-scope-gsc-manual')?.value || '').trim(),
+          bing_site: (document.getElementById('agent-scope-bing')?.value || '').trim() || (document.getElementById('agent-scope-bing-manual')?.value || '').trim(),
         };
         updateData.data_scope = data_scope;
         const origHtml = saveBtn.innerHTML;
@@ -2484,18 +2495,21 @@
             <option value="">Any connected repository</option>
           </select>
           <div class="text-xs text-muted" style="margin-top:6px">Agent code edits and PRs will default to this repo.</div>
+          <input type="text" class="form-input" id="wizard-scope-repo-manual" placeholder="Or enter manually (owner/repo)" style="margin-top:8px" value="${escapeHtml(wizardData.data_scope?.github_repo || '')}">
         </div>
         <div class="form-group">
           <label class="form-label">Scoped Google Search Console Property</label>
           <select class="form-select" id="wizard-scope-gsc">
             <option value="">Any connected GSC property</option>
           </select>
+          <input type="text" class="form-input" id="wizard-scope-gsc-manual" placeholder="Or enter manually (https://example.com/ or sc-domain:example.com)" style="margin-top:8px" value="${escapeHtml(wizardData.data_scope?.gsc_site || '')}">
         </div>
         <div class="form-group">
           <label class="form-label">Scoped Bing Webmaster Property</label>
           <select class="form-select" id="wizard-scope-bing">
             <option value="">Any connected Bing property</option>
           </select>
+          <input type="text" class="form-input" id="wizard-scope-bing-manual" placeholder="Or enter manually (https://example.com/)" style="margin-top:8px" value="${escapeHtml(wizardData.data_scope?.bing_site || '')}">
         </div>
       </div>
       <div class="card" style="max-width:760px">
@@ -2557,6 +2571,9 @@
         const repoSel = document.getElementById('wizard-scope-repo');
         const gscSel = document.getElementById('wizard-scope-gsc');
         const bingSel = document.getElementById('wizard-scope-bing');
+        const repoManual = document.getElementById('wizard-scope-repo-manual');
+        const gscManual = document.getElementById('wizard-scope-gsc-manual');
+        const bingManual = document.getElementById('wizard-scope-bing-manual');
         const loadingEl = document.getElementById('wizard-scope-loading');
         if (!repoSel || !gscSel || !bingSel) return;
 
@@ -2572,6 +2589,9 @@
         repoSel.value = wizardData.data_scope?.github_repo || '';
         gscSel.value = wizardData.data_scope?.gsc_site || '';
         bingSel.value = wizardData.data_scope?.bing_site || '';
+        if (repoManual) repoManual.value = wizardData.data_scope?.github_repo || '';
+        if (gscManual) gscManual.value = wizardData.data_scope?.gsc_site || '';
+        if (bingManual) bingManual.value = wizardData.data_scope?.bing_site || '';
 
         if (loadingEl) {
           const ghDiag = diagnostics.github?.detail || 'No diagnostics';
@@ -2824,10 +2844,16 @@
         wizardData.goals = checked;
         break;
       case 3:
+        const repoSelected = document.getElementById('wizard-scope-repo')?.value?.trim() || '';
+        const gscSelected = document.getElementById('wizard-scope-gsc')?.value?.trim() || '';
+        const bingSelected = document.getElementById('wizard-scope-bing')?.value?.trim() || '';
+        const repoManual = document.getElementById('wizard-scope-repo-manual')?.value?.trim() || '';
+        const gscManual = document.getElementById('wizard-scope-gsc-manual')?.value?.trim() || '';
+        const bingManual = document.getElementById('wizard-scope-bing-manual')?.value?.trim() || '';
         wizardData.data_scope = {
-          github_repo: document.getElementById('wizard-scope-repo')?.value || '',
-          gsc_site: document.getElementById('wizard-scope-gsc')?.value || '',
-          bing_site: document.getElementById('wizard-scope-bing')?.value || '',
+          github_repo: repoSelected || repoManual,
+          gsc_site: gscSelected || gscManual,
+          bing_site: bingSelected || bingManual,
         };
         break;
       case 4:
