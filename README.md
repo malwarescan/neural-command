@@ -22,17 +22,25 @@ Go to your service → **Variables** tab and add:
 
 | Variable | Value |
 |---|---|
-| `SUPABASE_URL` | `https://jhtxerijupjkuxxzklpf.supabase.co` |
-| `SUPABASE_ANON_KEY` | your key |
-| `SUPABASE_SERVICE_ROLE_KEY` | your key |
-| `OPENAI_API_KEY` | your key |
-| `STRIPE_SECRET_KEY` | your key |
-| `STRIPE_PUBLISHABLE_KEY` | your key |
+| `SUPABASE_URL` | `https://YOUR_PROJECT_REF.supabase.co` |
+| `SUPABASE_ANON_KEY` | `YOUR_SUPABASE_ANON_KEY` |
+| `SUPABASE_SERVICE_ROLE_KEY` | `YOUR_SUPABASE_SERVICE_ROLE_KEY` |
+| `OPENAI_API_KEY` | `YOUR_OPENAI_API_KEY` |
+| `STRIPE_SECRET_KEY` | `YOUR_STRIPE_SECRET_KEY` |
+| `STRIPE_PUBLISHABLE_KEY` | `YOUR_STRIPE_PUBLISHABLE_KEY` |
 
 ### 4. Generate a public domain
 In Railway → **Settings** → **Networking** → **Generate Domain**
 
 This gives you a URL like `neural-command-production.up.railway.app`
+
+### 5. Point Croutons.ai to Railway
+Add a CNAME record in your DNS:
+- `app.croutons.ai` → `your-railway-domain.up.railway.app`
+
+### Test Account
+- Email: `demo@croutons.ai`
+- Password: `Demo1234!`
 
 ## Architecture
 - **Backend:** FastAPI (Python) — serves API + static frontend

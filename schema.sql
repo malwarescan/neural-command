@@ -28,6 +28,7 @@ CREATE POLICY "Users can update own profile"
   ON public.profiles FOR UPDATE
   USING (auth.uid() = id);
 
+-- Service role can do anything
 CREATE POLICY "Service role full access to profiles"
   ON public.profiles FOR ALL
   USING (auth.role() = 'service_role');
@@ -79,7 +80,7 @@ CREATE POLICY "Service role full access to agents"
   USING (auth.role() = 'service_role');
 
 -- ============================================
--- 3. AGENT RUNS TABLE
+-- 3. AGENT RUNS TABLE (execution history)
 -- ============================================
 CREATE TABLE public.agent_runs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -110,7 +111,7 @@ CREATE POLICY "Service role full access to agent_runs"
   USING (auth.role() = 'service_role');
 
 -- ============================================
--- 4. CONNECTIONS TABLE
+-- 4. CONNECTIONS TABLE (service integrations)
 -- ============================================
 CREATE TABLE public.connections (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -147,7 +148,7 @@ CREATE POLICY "Service role full access to connections"
   USING (auth.role() = 'service_role');
 
 -- ============================================
--- 5. USAGE RECORDS TABLE
+-- 5. USAGE RECORDS TABLE (for billing)
 -- ============================================
 CREATE TABLE public.usage_records (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -172,7 +173,7 @@ CREATE POLICY "Service role full access to usage_records"
   USING (auth.role() = 'service_role');
 
 -- ============================================
--- 6. WAITLIST TABLE
+-- 6. WAITLIST TABLE (from landing page)
 -- ============================================
 CREATE TABLE public.waitlist (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -209,12 +210,13 @@ BEGIN
 END;
 $$;
 
+-- Trigger: when a new user signs up, auto-create their profile
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
 
 -- ============================================
--- 8. INDEXES
+-- 8. INDEXES for performance
 -- ============================================
 CREATE INDEX idx_agents_user_id ON public.agents(user_id);
 CREATE INDEX idx_agent_runs_agent_id ON public.agent_runs(agent_id);
@@ -225,7 +227,7 @@ CREATE INDEX idx_usage_records_created_at ON public.usage_records(created_at DES
 CREATE INDEX idx_connections_user_id ON public.connections(user_id);
 
 -- ============================================
--- 9. Updated_at trigger
+-- 9. Updated_at trigger function
 -- ============================================
 CREATE OR REPLACE FUNCTION public.update_updated_at()
 RETURNS TRIGGER

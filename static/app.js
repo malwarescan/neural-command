@@ -34,6 +34,31 @@
     schedule: 'daily',
     rules: [],
     data_scope: { github_repo: '', gsc_site: '', bing_site: '' },
+    automation_mode: 'approval_publish_distribution',
+    approval_rules: {
+      require_for_all_actions: false,
+      require_for_publish: true,
+      require_for_distribution: true,
+      block_money_pages_without_approval: true,
+      max_executions_per_day: 8,
+    },
+    execution_permissions: {
+      draft_content: true,
+      patch_existing_pages: true,
+      create_new_pages: false,
+      apply_schema_only: true,
+      publish_content: false,
+      distribute_social: false,
+      submit_indexing: true,
+      update_markdown_layers: true,
+    },
+    allowed_targets: {
+      site_sections: [],
+      distribution_channels: [],
+      competitor_domains: [],
+    },
+    lifecycle_state: 'Watching',
+    success_metrics: [],
   };
   let scopeOptionsCache = null;
 
@@ -83,15 +108,16 @@
 
   function normalizeRulesBundle(rules) {
     if (Array.isArray(rules)) {
-      return { text_rules: rules.filter(Boolean), data_scope: {} };
+      return { text_rules: rules.filter(Boolean), data_scope: {}, operator_settings: {} };
     }
     if (rules && typeof rules === 'object') {
       return {
         text_rules: Array.isArray(rules.text_rules) ? rules.text_rules.filter(Boolean) : [],
         data_scope: (rules.data_scope && typeof rules.data_scope === 'object') ? rules.data_scope : {},
+        operator_settings: (rules.operator_settings && typeof rules.operator_settings === 'object') ? rules.operator_settings : {},
       };
     }
-    return { text_rules: [], data_scope: {} };
+    return { text_rules: [], data_scope: {}, operator_settings: {} };
   }
 
   function getAgentDataScope(agent) {
@@ -104,6 +130,19 @@
     };
   }
 
+  function getAgentOperatorSettings(agent) {
+    const bundle = normalizeRulesBundle(agent?.rules);
+    const s = bundle.operator_settings || {};
+    return {
+      automation_mode: s.automation_mode || agent?.automation_mode || 'approval_publish_distribution',
+      approval_rules: s.approval_rules || agent?.approval_rules || {},
+      execution_permissions: s.execution_permissions || agent?.execution_permissions || {},
+      allowed_targets: s.allowed_targets || agent?.allowed_targets || {},
+      lifecycle_state: s.lifecycle_state || agent?.lifecycle_state || 'Watching',
+      success_metrics: Array.isArray(s.success_metrics) ? s.success_metrics : (Array.isArray(agent?.success_metrics) ? agent.success_metrics : []),
+    };
+  }
+
   async function loadScopeOptions(force = false) {
     if (!force && scopeOptionsCache) return scopeOptionsCache;
     const opts = await apiFetch('/api/agent-scope/options');
@@ -113,6 +152,7 @@
 
   // ── TOAST ──────────────────────────────────
   function toast(message, type = 'info') {
+    if (demoStatusCache?.recording_mode && type === 'info') return;
     const container = document.getElementById('toast-container');
     const t = el('div', { className: `toast toast-${type}` });
     const iconMap = { success: 'check-circle', error: 'alert-circle', info: 'info' };
@@ -367,10 +407,10 @@
   // ── APP SHELL ──────────────────────────────
   function renderAppShell(route, container) {
     const navItems = [
-      { icon: 'layout-dashboard', label: 'Dashboard', hash: '#/dashboard' },
+      { icon: 'layout-dashboard', label: 'Overview', hash: '#/dashboard' },
       { icon: 'radar', label: 'Command Center', hash: '#/command-center' },
-      { icon: 'bot', label: 'My Agents', hash: '#/agents' },
-      { icon: 'plus-circle', label: 'Create Agent', hash: '#/wizard' },
+      { icon: 'bot', label: 'Agents', hash: '#/agents' },
+      { icon: 'plus-circle', label: 'Create Operator', hash: '#/wizard' },
       { icon: 'layers', label: 'Templates', hash: '#/templates' },
       { icon: 'plug', label: 'Connections', hash: '#/connections' },
       { icon: 'credit-card', label: 'Billing', hash: '#/billing' },
@@ -383,10 +423,10 @@
     const userInitial = (userName[0] || 'U').toUpperCase();
 
     // Determine page title
-    let pageTitle = 'Dashboard';
+    let pageTitle = 'Overview';
     if (route === '#/command-center') pageTitle = 'Command Center';
-    else if (route === '#/agents') pageTitle = 'My Agents';
-    else if (route === '#/wizard') pageTitle = 'Create Agent';
+    else if (route === '#/agents') pageTitle = 'Operators';
+    else if (route === '#/wizard') pageTitle = 'Create Search Operator';
     else if (route === '#/templates') pageTitle = 'Templates';
     else if (route === '#/connections') pageTitle = 'Connections';
     else if (route === '#/billing') pageTitle = 'Billing';
@@ -496,26 +536,95 @@
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
       const data = await apiFetch('/api/dashboard');
+      const ops = data.search_ops || {};
+      const loop = ops.lifecycle_counts || {};
+      const k = ops.kpis || {};
       const plan = data.current_plan || 'free';
       const callsPct = data.api_calls_limit > 0 ? Math.min((data.api_calls_this_month / data.api_calls_limit) * 100, 100) : 0;
       const pctClass = callsPct > 90 ? 'danger' : callsPct > 70 ? 'warning' : '';
 
       container.innerHTML = `
         <div class="page-header">
-          <h1 class="page-title">Dashboard</h1>
-          <p class="page-subtitle">Overview of your AI agents and usage</p>
+          <h1 class="page-title">Search Operations Overview</h1>
+          <p class="page-subtitle">${escapeHtml(ops.headline || 'Detect opportunities. Execute updates. Earn visibility.')}</p>
+        </div>
+
+        <div class="card" style="margin-bottom:16px">
+          <div class="card-header"><h3 class="card-title">Operating Loop</h3></div>
+          <div class="kpi-grid" style="grid-template-columns:repeat(5,1fr)">
+            <div class="kpi-card"><div class="kpi-label">Observe</div><div class="kpi-value">${loop.observe || 0}</div><div class="kpi-meta">Signals detected</div></div>
+            <div class="kpi-card"><div class="kpi-label">Diagnose</div><div class="kpi-value">${loop.diagnose || 0}</div><div class="kpi-meta">Opportunities formed</div></div>
+            <div class="kpi-card"><div class="kpi-label">Plan</div><div class="kpi-value">${loop.plan || 0}</div><div class="kpi-meta">Plans ready</div></div>
+            <div class="kpi-card"><div class="kpi-label">Execute</div><div class="kpi-value">${loop.execute || 0}</div><div class="kpi-meta">Executions active</div></div>
+            <div class="kpi-card"><div class="kpi-label">Measure</div><div class="kpi-value">${loop.measure || 0}</div><div class="kpi-meta">Outcomes measured</div></div>
+          </div>
         </div>
 
         <div class="kpi-grid">
           <div class="kpi-card">
-            <div class="kpi-label">Total Agents</div>
-            <div class="kpi-value">${data.total_agents}</div>
-            <div class="kpi-meta">${data.active_agents} active</div>
+            <div class="kpi-label">Active Agents</div>
+            <div class="kpi-value">${k.active_agents ?? data.active_agents}</div>
+            <div class="kpi-meta">${data.total_agents} total operators</div>
           </div>
           <div class="kpi-card">
-            <div class="kpi-label">Active Runs</div>
-            <div class="kpi-value">${data.active_runs}</div>
-            <div class="kpi-meta">Currently running</div>
+            <div class="kpi-label">Signals Today</div>
+            <div class="kpi-value">${k.signals_detected_today || 0}</div>
+            <div class="kpi-meta">${k.opportunities_open || 0} open opportunities</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Plans / Executions</div>
+            <div class="kpi-value">${k.plans_ready || 0}<span style="font-size:14px;color:var(--color-text-muted)"> ready</span></div>
+            <div class="kpi-meta">${k.executions_today || 0} executions today</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Citations Earned</div>
+            <div class="kpi-value">${k.citations_earned || 0}</div>
+            <div class="kpi-meta">Visibility lift ${k.estimated_visibility_lift || 0}%</div>
+          </div>
+        </div>
+
+        <div class="cc-grid-2" style="margin-top:16px">
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Top Active Signals</h3></div>
+            ${(ops.signals || []).slice(0, 4).map(s => `
+              <div class="cc-activity-item">
+                <span class="badge badge-${s.severity === 'high' ? 'failed' : s.severity === 'medium' ? 'warning' : 'active'}">${escapeHtml(s.severity || 'low')}</span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">${escapeHtml(s.title || '')}</span>
+                  <span class="cc-activity-text">${escapeHtml(s.description || '')}</span>
+                </div>
+              </div>
+            `).join('') || '<p class="text-sm text-muted">No active signals</p>'}
+          </div>
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">Top Citation Gaps</h3></div>
+            ${(ops.citation_gaps || []).slice(0, 3).map(g => `
+              <div class="cc-activity-item">
+                <span class="tag">${escapeHtml(g.gap_type || 'gap')}</span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">${escapeHtml(g.target_topic || '')}</span>
+                  <span class="cc-activity-text">Format: ${escapeHtml(g.content_format_recommended || 'n/a')} · Urgency ${(Math.round((g.urgency_score || 0) * 100))}%</span>
+                </div>
+              </div>
+            `).join('') || '<p class="text-sm text-muted">No citation gaps detected</p>'}
+          </div>
+        </div>
+
+        <div class="kpi-grid" style="margin-top:16px">
+          <div class="kpi-card">
+            <div class="kpi-label">Ranking Wins</div>
+            <div class="kpi-value">${k.ranking_wins || 0}</div>
+            <div class="kpi-meta">Recovered / improved positions</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Content Published</div>
+            <div class="kpi-value">${k.content_published || 0}</div>
+            <div class="kpi-meta">Pages and articles shipped</div>
+          </div>
+          <div class="kpi-card">
+            <div class="kpi-label">Distribution Actions</div>
+            <div class="kpi-value">${k.distribution_actions || 0}</div>
+            <div class="kpi-meta">Threads/posts shipped</div>
           </div>
           <div class="kpi-card">
             <div class="kpi-label">API Calls</div>
@@ -524,32 +633,27 @@
               <div class="progress-bar"><div class="progress-bar-fill ${pctClass}" style="width:${callsPct}%"></div></div>
             </div>
           </div>
-          <div class="kpi-card">
-            <div class="kpi-label">Current Plan</div>
-            <div class="kpi-value" style="font-size:22px;text-transform:capitalize">${plan}</div>
-            <div class="kpi-meta"><span class="badge badge-${plan}">${plan}</span></div>
-          </div>
         </div>
 
         ${data.total_agents === 0 ? `
           <div class="card" style="text-align:center;padding:48px 24px;margin-bottom:24px">
             <div class="empty-state-icon" style="margin:0 auto 16px"><i data-lucide="bot" style="width:28px;height:28px"></i></div>
-            <h3 class="empty-state-title">Create Your First Agent</h3>
-            <p class="empty-state-desc">Deploy an AI agent to automate your workflow. Choose from templates or build from scratch.</p>
-            <a href="#/wizard" class="btn btn-primary btn-lg">Get Started</a>
+            <h3 class="empty-state-title">Create Your First Search Operator</h3>
+            <p class="empty-state-desc">Define what it watches, what actions it can execute, and how success is measured.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Create Operator</a>
           </div>
         ` : ''}
 
         <div class="card">
           <div class="card-header">
-            <h3 class="card-title">Recent Activity</h3>
+            <h3 class="card-title">Recent Executions</h3>
           </div>
           ${data.recent_runs.length === 0
-            ? `<p class="text-sm text-muted" style="padding:16px 0">No recent activity yet. Run an agent to see results here.</p>`
+            ? `<p class="text-sm text-muted" style="padding:16px 0">No recent executions yet. Use Command Center to approve or run a plan.</p>`
             : `<table class="runs-table">
                 <thead>
                   <tr>
-                    <th>Agent</th>
+                    <th>Operator</th>
                     <th>Status</th>
                     <th>Tokens</th>
                     <th>Time</th>
@@ -579,6 +683,26 @@
   // ── COMMAND CENTER ────────────────────────
   let ccActiveTab = 'overview';
   let ccCharts = {};
+  let ccIntelCache = null;
+  let demoScenariosCache = [];
+  let demoPacksCache = [];
+  let demoStatusCache = null;
+  let walkthroughLibraryCache = [];
+  let walkthroughStatusCache = null;
+  let walkthroughOverlayEl = null;
+  let walkthroughAutoTimer = null;
+  let ccFilter = {
+    status: 'all',
+    approval: 'all',
+    assigned_agent: 'all',
+    object_type: 'all',
+  };
+  let ccSelection = {
+    signals: new Set(),
+    opportunities: new Set(),
+    plans: new Set(),
+    executions: new Set(),
+  };
   let ccScope = (() => {
     try {
       const saved = JSON.parse(localStorage.getItem('nc_cc_scope') || '{}');
@@ -610,17 +734,625 @@
     return p.toString() ? `?${p.toString()}` : '';
   }
 
+  async function loadSearchOpsIntel() {
+    const data = await apiFetch(`/api/search-ops/intelligence${getCCScopeQuery()}`);
+    ccIntelCache = data;
+    demoStatusCache = data.demo_status || demoStatusCache;
+    return data;
+  }
+
+  async function loadDemoScenarios() {
+    const res = await apiFetch('/api/demo/scenarios');
+    demoScenariosCache = res.scenarios || [];
+    return demoScenariosCache;
+  }
+
+  async function loadDemoPacks() {
+    const res = await apiFetch('/api/demo/demo-packs');
+    demoPacksCache = res.demo_packs || [];
+    return demoPacksCache;
+  }
+
+  async function loadDemoStatus() {
+    const res = await apiFetch('/api/demo/scenario/status');
+    demoStatusCache = res.status || null;
+    return res;
+  }
+
+  async function loadWalkthroughLibrary() {
+    const res = await apiFetch('/api/demo/walkthroughs');
+    walkthroughLibraryCache = res.walkthroughs || [];
+    return walkthroughLibraryCache;
+  }
+
+  async function loadWalkthroughStatus() {
+    const res = await apiFetch('/api/demo/walkthrough/status');
+    walkthroughStatusCache = res.status || null;
+    return walkthroughStatusCache;
+  }
+
+  async function demoAction(path, body = null) {
+    const res = await apiFetch(path, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (res?.status) demoStatusCache = res.status;
+    if (res?.intelligence) ccIntelCache = res.intelligence;
+    return res;
+  }
+
+  function objectTypePath(kind) {
+    if (kind === 'signal') return 'signals';
+    if (kind === 'opportunity') return 'opportunities';
+    if (kind === 'citation_gap') return 'citation-gaps';
+    if (kind === 'plan') return 'plans';
+    if (kind === 'execution') return 'executions';
+    if (kind === 'outcome') return 'outcomes';
+    if (kind === 'competitor') return 'competitors';
+    if (kind === 'agent') return 'agents';
+    if (kind === 'approval') return 'approvals';
+    if (kind === 'artifact') return 'artifacts';
+    return '';
+  }
+
+  function getObjectStatus(obj) {
+    return (obj?.status || obj?.approval_state || '').toString().toLowerCase();
+  }
+
+  function matchesCCFilter(obj) {
+    if (!obj) return true;
+    if (ccFilter.status !== 'all') {
+      const state = getObjectStatus(obj);
+      if (!state.includes(ccFilter.status)) return false;
+    }
+    if (ccFilter.approval === 'required') {
+      const needsApproval = String(obj.approval_state || '').includes('pending') || String(obj.status || '').includes('pending_approval');
+      if (!needsApproval) return false;
+    }
+    if (ccFilter.assigned_agent !== 'all') {
+      const assigned = obj.assigned_agent_id || obj.agent_id || 'unassigned';
+      if (assigned !== ccFilter.assigned_agent) return false;
+    }
+    return true;
+  }
+
+  function renderCCQueueBar(intel) {
+    const q = intel?.queue_counts || {};
+    const chips = [
+      ['New Signals', q.new_signals || 0, 'signals', 'new'],
+      ['Open Opportunities', q.open_opportunities || 0, 'opportunities', 'open'],
+      ['Needs Approval', q.needs_approval || 0, 'plans', 'pending'],
+      ['Ready to Run', q.ready_to_run || 0, 'plans', 'approved'],
+      ['Running', q.running || 0, 'executions', 'running'],
+      ['Measuring Outcomes', q.measuring_outcomes || 0, 'outcomes', 'measuring'],
+      ['Dismissed / Snoozed', q.dismissed_or_snoozed || 0, 'signals', 'dismissed'],
+      ['Failed / Review', q.failed_or_review || 0, 'executions', 'failed'],
+    ];
+    return `<div class="card" style="margin-bottom:12px;padding:10px">
+      <div class="text-xs text-muted" style="margin-bottom:8px">Operational Queues</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${chips.map(([label, value, tab, status]) => `
+          <button class="btn btn-ghost btn-sm cc-queue-chip" data-tab="${tab}" data-status="${status}">
+            ${escapeHtml(label)} <span class="badge badge-active" style="margin-left:6px">${value}</span>
+          </button>
+        `).join('')}
+      </div>
+    </div>`;
+  }
+
+  function getDrawerActions(kind, obj) {
+    if (kind === 'signal') return [
+      { id: 'create_opportunity', label: 'Create Opportunity', tone: 'primary' },
+      { id: 'assign', label: 'Assign to Operator' },
+      { id: 'snooze', label: 'Snooze' },
+      { id: 'merge_opportunity', label: 'Merge into Opportunity' },
+      { id: 'convert_plan', label: 'Convert to Plan' },
+      { id: 'dismiss', label: 'Dismiss Signal' },
+      { id: 'mark_noise', label: 'Mark as Noise' },
+    ];
+    if (kind === 'opportunity') return [
+      { id: 'create_plan', label: 'Create Plan', tone: 'primary' },
+      { id: 'assign', label: 'Assign to Operator' },
+      { id: 'send_review', label: 'Send to Review' },
+      { id: 'auto_handle', label: 'Mark Auto-Handled' },
+      { id: 'escalate_priority', label: 'Escalate Priority' },
+      { id: 'snooze', label: 'Snooze' },
+      { id: 'dismiss', label: 'Dismiss' },
+    ];
+    if (kind === 'citation_gap') return [
+      { id: 'create_plan', label: 'Create Plan from Gap', tone: 'primary' },
+      { id: 'merge_plan', label: 'Merge into Existing Plan' },
+      { id: 'assign', label: 'Assign to Operator' },
+      { id: 'snooze', label: 'Snooze Gap' },
+      { id: 'dismiss', label: 'Dismiss Gap' },
+    ];
+    if (kind === 'plan') return [
+      { id: 'approve_and_run', label: 'Approve and Run', tone: 'primary' },
+      { id: 'approve', label: 'Approve' },
+      { id: 'reject', label: 'Reject' },
+      { id: 'pause', label: 'Pause' },
+      { id: 'resume', label: 'Resume' },
+      { id: 'duplicate', label: 'Duplicate' },
+      { id: 'schedule', label: 'Schedule' },
+      { id: 'assign', label: 'Assign' },
+      { id: 'cancel', label: 'Cancel' },
+    ];
+    if (kind === 'execution') return [
+      { id: 'retry_step', label: 'Retry Failed Step', tone: 'primary' },
+      { id: 'rerun', label: 'Rerun Full Execution' },
+      { id: 'approve_blocked', label: 'Continue After Approval' },
+      { id: 'pause', label: 'Pause Execution' },
+      { id: 'resume', label: 'Resume Execution' },
+      { id: 'cancel', label: 'Cancel Execution' },
+      { id: 'branch_to_plan', label: 'Branch to New Plan' },
+      { id: 'mark_review', label: 'Mark for Review' },
+    ];
+    if (kind === 'outcome') return [
+      { id: 'validate', label: 'Validate Outcome', tone: 'primary' },
+      { id: 'create_followup_opportunity', label: 'Spawn Follow-Up Opportunity' },
+      { id: 'mark_inconclusive', label: 'Flag Inconclusive' },
+      { id: 'archive', label: 'Archive' },
+    ];
+    if (kind === 'competitor') return [
+      { id: 'spawn_counter_opportunity', label: 'Spawn Counter Opportunity', tone: 'primary' },
+      { id: 'assign_monitoring', label: 'Assign Monitoring' },
+      { id: 'increase_priority', label: 'Increase Watch Priority' },
+      { id: 'mute', label: 'Mute / Deprioritize' },
+    ];
+    return [];
+  }
+
+  function lookupIntelObject(kind, id, intel) {
+    const src = intel || ccIntelCache || {};
+    if (kind === 'signal') return (src.signals || []).find(x => x.id === id);
+    if (kind === 'opportunity') return (src.opportunities || []).find(x => x.id === id);
+    if (kind === 'citation_gap') return (src.citation_gaps || []).find(x => x.gap_id === id || x.id === id);
+    if (kind === 'plan') return (src.plans || []).find(x => x.id === id);
+    if (kind === 'execution') return (src.executions || []).find(x => x.id === id);
+    if (kind === 'outcome') return (src.outcomes || []).find(x => x.id === id);
+    if (kind === 'competitor') return (src.competitors || []).find(x => x.id === id);
+    if (kind === 'agent') return (src.agents || []).find(x => x.id === id);
+    return null;
+  }
+
+  function renderLinkChain(links = []) {
+    if (!links.length) return '';
+    return `<div class="text-xs text-muted" style="margin:10px 0 14px 0">` + links.map(l =>
+      `<a href="#" class="intel-link" data-kind="${l.kind}" data-id="${escapeHtml(l.id)}">${escapeHtml(l.label)}</a>`
+    ).join(' &nbsp;&gt;&nbsp; ') + `</div>`;
+  }
+
+  async function mutateIntelObject(kind, id, action, payload = {}) {
+    const path = objectTypePath(kind);
+    if (!path) throw new Error('Unsupported object type');
+    const res = await apiFetch(`/api/search-ops/${path}/${encodeURIComponent(id)}/action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, payload }),
+    });
+    if (res?.intelligence) ccIntelCache = res.intelligence;
+    return res;
+  }
+
+  async function batchMutateIntelObjects(kind, ids, action, payload = {}) {
+    const path = objectTypePath(kind);
+    if (!path) throw new Error('Unsupported object type');
+    const res = await apiFetch(`/api/search-ops/${path}/batch-action`, {
+      method: 'POST',
+      body: JSON.stringify({ action, object_ids: ids, payload }),
+    });
+    if (res?.intelligence) ccIntelCache = res.intelligence;
+    return res;
+  }
+
+  async function buildActionPayload(kind, action, obj) {
+    const payload = {};
+    if (action === 'assign' || action === 'assign_monitoring') {
+      const agentId = prompt('Assign to agent ID (leave blank to cancel):', obj?.assigned_agent_id || '');
+      if (!agentId) return null;
+      payload.agent_id = agentId.trim();
+      payload.agent_name = prompt('Agent display name (optional):', obj?.assigned_agent_name || '') || '';
+    }
+    if (action === 'merge_opportunity') {
+      const opportunityId = prompt('Merge into opportunity ID:', (obj?.linked_opportunity_ids || [])[0] || '');
+      if (!opportunityId) return null;
+      payload.opportunity_id = opportunityId.trim();
+    }
+    if (action === 'merge_plan') {
+      const planId = prompt('Merge into plan ID:');
+      if (!planId) return null;
+      payload.plan_id = planId.trim();
+    }
+    if (action === 'schedule') {
+      const scheduled = prompt('Schedule timestamp (ISO or note):', new Date(Date.now() + 3600 * 1000).toISOString());
+      if (!scheduled) return null;
+      payload.scheduled_for = scheduled;
+    }
+    if (action === 'dismiss' || action === 'mark_noise' || action === 'reject') {
+      payload.reason = prompt('Reason (optional):', '') || '';
+    }
+    if (action === 'snooze') {
+      payload.until = prompt('Snooze until (ISO/date note):', 'Tomorrow 09:00') || '';
+    }
+    if (action === 'retry_step') {
+      payload.step = prompt('Step name or ID to retry:', 'failed_step') || 'failed_step';
+    }
+    if (action === 'approve_blocked') {
+      payload.reason = prompt('Approval note (optional):', '') || '';
+    }
+    if (action === 'track_topics') {
+      const topics = prompt('Topics (comma separated):', '');
+      if (!topics) return null;
+      payload.topics = topics.split(',').map(s => s.trim()).filter(Boolean);
+    }
+    return payload;
+  }
+
+  function clearWalkthroughOverlay() {
+    if (walkthroughAutoTimer) { clearTimeout(walkthroughAutoTimer); walkthroughAutoTimer = null; }
+    if (walkthroughOverlayEl && walkthroughOverlayEl.parentNode) walkthroughOverlayEl.parentNode.removeChild(walkthroughOverlayEl);
+    walkthroughOverlayEl = null;
+    const prior = document.querySelector('.wt-highlight-target');
+    if (prior) prior.classList.remove('wt-highlight-target');
+  }
+
+  function findWalkthroughTarget(step) {
+    if (!step) return null;
+    if (step.target_selector) {
+      try { return document.querySelector(step.target_selector); } catch { return null; }
+    }
+    return null;
+  }
+
+  function applyWalkthroughAutoNavigation(step) {
+    if (!step) return;
+    if (step.action_type === 'navigate_tab' && step.completion_condition?.tab) {
+      ccActiveTab = step.completion_condition.tab;
+      const main = document.getElementById('main-content');
+      if (main && location.hash === '#/command-center') renderCommandCenter(main);
+      return;
+    }
+    if (step.action_type === 'open_inspect' && step.object_ref?.kind) {
+      const intel = ccIntelCache || {};
+      const kind = step.object_ref.kind;
+      let id = step.object_ref.id;
+      if (!id) {
+        const src = kind === 'execution' ? intel.executions : kind === 'signal' ? intel.signals : kind === 'opportunity' ? intel.opportunities : [];
+        id = (src && src[0] && src[0].id) || '';
+      }
+      if (id) window.NC.inspectIntelObject(kind, id, intel);
+    }
+  }
+
+  function renderWalkthroughOverlay(status) {
+    if (!document.getElementById('wt-overlay-style')) {
+      const st = document.createElement('style');
+      st.id = 'wt-overlay-style';
+      st.textContent = `.wt-highlight-target{outline:2px solid #00c8ff !important;outline-offset:2px;box-shadow:0 0 0 6px rgba(0,200,255,0.12) !important;}`;
+      document.head.appendChild(st);
+    }
+    clearWalkthroughOverlay();
+    const wt = status?.walkthrough || {};
+    const step = status?.current_step;
+    if (!status?.walkthrough_active || !step) return;
+    const target = findWalkthroughTarget(step);
+    if (target) target.classList.add('wt-highlight-target');
+    walkthroughOverlayEl = el('div', { className: 'modal-overlay' });
+    walkthroughOverlayEl.style.pointerEvents = 'none';
+    walkthroughOverlayEl.innerHTML = `
+      <div class="modal" style="max-width:430px;position:fixed;right:18px;bottom:18px;pointer-events:auto">
+        <div class="modal-header">
+          <h3 class="modal-title">Walkthrough · ${escapeHtml(wt.name || '')}</h3>
+          <button class="btn btn-ghost btn-xs wt-close">End</button>
+        </div>
+        <div class="modal-body">
+          <div class="text-xs text-muted">Step ${Number(status.current_step_index || 0) + 1} / ${Number(wt.total_steps || (wt.steps || []).length || 0)}</div>
+          <div class="text-xs text-muted" style="margin-top:2px">Path: ${escapeHtml(status.walkthrough_path_signature || 'mainline')} ${status.current_branch_id ? `· Branch ${escapeHtml(status.current_branch_id)}` : ''}</div>
+          <div class="text-sm" style="font-weight:600;margin-top:4px">${escapeHtml(step.title || '')}</div>
+          <div class="text-xs text-muted" style="margin-top:4px">${escapeHtml(step.description || '')}</div>
+          <div class="text-xs" style="margin-top:8px"><strong>Expected action:</strong> ${escapeHtml(step.expected_user_action || 'Follow guided instruction')}</div>
+          <div class="text-xs" style="margin-top:4px"><strong>Business value:</strong> ${escapeHtml(step.business_value_note || '')}</div>
+          ${step.speaker_note ? `<div class="text-xs" style="margin-top:4px"><strong>Speaker note:</strong> ${escapeHtml(step.speaker_note)}</div>` : ''}
+          ${(step.optional_branching || []).length ? `<div style="margin-top:8px;padding:6px;border:1px solid var(--color-border);border-radius:6px">
+            <div class="text-xs" style="font-weight:600;margin-bottom:6px">Choose path</div>
+            ${(step.optional_branching || []).map(b => `<button class="btn btn-secondary btn-xs wt-branch" data-branch-id="${escapeHtml(b.branch_id)}" style="margin:2px 4px 2px 0">${escapeHtml(b.label || b.branch_id)}</button><div class="text-xs text-muted" style="margin-bottom:4px">${escapeHtml(b.description || '')}</div>`).join('')}
+          </div>` : ''}
+          ${!target ? `<div class="text-xs text-muted" style="margin-top:6px">Target not currently visible. Use auto-open or continue manually.</div>` : ''}
+        </div>
+        <div class="modal-footer" style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn btn-secondary btn-xs wt-back">Back</button>
+          <button class="btn btn-secondary btn-xs wt-mainline">Return Mainline</button>
+          <button class="btn btn-secondary btn-xs wt-auto">Auto-open target</button>
+          <button class="btn btn-primary btn-xs wt-next">Next</button>
+          <button class="btn btn-secondary btn-xs wt-pause">Pause</button>
+        </div>
+      </div>`;
+    document.body.appendChild(walkthroughOverlayEl);
+    walkthroughOverlayEl.querySelector('.wt-close')?.addEventListener('click', async () => {
+      await apiFetch('/api/demo/walkthrough/end', { method: 'POST' });
+      clearWalkthroughOverlay();
+      toast('Walkthrough ended', 'success');
+    });
+    walkthroughOverlayEl.querySelector('.wt-back')?.addEventListener('click', async () => {
+      await apiFetch('/api/demo/walkthrough/back', { method: 'POST' });
+      const st = await loadWalkthroughStatus();
+      renderWalkthroughOverlay(st);
+    });
+    walkthroughOverlayEl.querySelector('.wt-mainline')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/walkthrough/return-mainline', { method: 'POST' });
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+      } catch (err) { toast(err.message || 'Failed to return mainline', 'error'); }
+    });
+    walkthroughOverlayEl.querySelectorAll('.wt-branch').forEach(btn => btn.addEventListener('click', async () => {
+      const branchId = btn.dataset.branchId;
+      if (!branchId) return;
+      try {
+        await apiFetch('/api/demo/walkthrough/branch', { method: 'POST', body: JSON.stringify({ branch_id: branchId }) });
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+      } catch (err) { toast(err.message || 'Branch selection failed', 'error'); }
+    }));
+    walkthroughOverlayEl.querySelector('.wt-auto')?.addEventListener('click', () => applyWalkthroughAutoNavigation(step));
+    walkthroughOverlayEl.querySelector('.wt-next')?.addEventListener('click', async () => {
+      try {
+        const res = await apiFetch('/api/demo/walkthrough/next', { method: 'POST' });
+        if (res.validation && !res.validation.ok) toast(res.validation.message || 'Step not complete yet', 'warning');
+        await loadSearchOpsIntel();
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+      } catch (err) { toast(err.message || 'Failed to advance walkthrough', 'error'); }
+    });
+    walkthroughOverlayEl.querySelector('.wt-pause')?.addEventListener('click', async () => {
+      await apiFetch('/api/demo/walkthrough/pause', { method: 'POST' });
+      clearWalkthroughOverlay();
+      toast('Walkthrough paused', 'success');
+    });
+    const isRecorded = String(status?.mode || '').toLowerCase().includes('recorded');
+    if (isRecorded && step.can_auto_advance) {
+      walkthroughAutoTimer = setTimeout(async () => {
+        try {
+          applyWalkthroughAutoNavigation(step);
+          const res = await apiFetch('/api/demo/walkthrough/next', { method: 'POST' });
+          if (res.validation && !res.validation.ok) return;
+          await loadSearchOpsIntel();
+          const st = await loadWalkthroughStatus();
+          renderWalkthroughOverlay(st);
+        } catch {}
+      }, Number(step.auto_advance_delay_ms || 900));
+    }
+  }
+
+  function showIntelInspect(kind, id, providedIntel = null) {
+    const intel = providedIntel || ccIntelCache || {};
+    const obj = lookupIntelObject(kind, id, intel);
+    if (!obj) { toast('Object not found', 'error'); return; }
+
+    const overlay = el('div', { className: 'modal-overlay' });
+    const links = [];
+    if (kind === 'signal' && Array.isArray(obj.linked_opportunity_ids)) {
+      obj.linked_opportunity_ids.forEach(oid => links.push({ kind: 'opportunity', id: oid, label: `Opportunity ${oid}` }));
+    }
+    if (kind === 'opportunity') {
+      (obj.signal_ids || []).forEach(sid => links.push({ kind: 'signal', id: sid, label: `Signal ${sid}` }));
+      (obj.linked_plan_ids || []).forEach(pid => links.push({ kind: 'plan', id: pid, label: `Plan ${pid}` }));
+    }
+    if (kind === 'citation_gap') {
+      (obj.linked_plan_ids || []).forEach(pid => links.push({ kind: 'plan', id: pid, label: `Plan ${pid}` }));
+    }
+    if (kind === 'plan') {
+      if (obj.opportunity_id) links.push({ kind: 'opportunity', id: obj.opportunity_id, label: `Opportunity ${obj.opportunity_id}` });
+      (obj.linked_gap_ids || []).forEach(gid => links.push({ kind: 'citation_gap', id: gid, label: `Gap ${gid}` }));
+    }
+    if (kind === 'execution') {
+      if (obj.plan_id) links.push({ kind: 'plan', id: obj.plan_id, label: `Plan ${obj.plan_id}` });
+      (obj.linked_outcome_ids || []).forEach(oid => links.push({ kind: 'outcome', id: oid, label: `Outcome ${oid}` }));
+    }
+    if (kind === 'outcome' && obj.execution_id) {
+      links.push({ kind: 'execution', id: obj.execution_id, label: `Execution ${obj.execution_id}` });
+    }
+    if (kind === 'competitor') {
+      (obj.opportunity_links || []).forEach(oid => links.push({ kind: 'opportunity', id: oid, label: `Opportunity ${oid}` }));
+    }
+
+    let body = '';
+    if (kind === 'signal') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.title || '')}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">${escapeHtml(obj.type || '')} · ${escapeHtml(obj.source || '')} · severity ${escapeHtml(obj.severity || 'n/a')} · confidence ${Math.round((obj.confidence || 0) * 100)}%</div>
+        ${renderLinkChain(links)}
+        <div class="text-sm" style="margin-bottom:10px">${escapeHtml(obj.description || '')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Target topic: ${escapeHtml(obj.topic || 'n/a')} · Cluster: ${escapeHtml(obj.target_keyword_cluster || 'n/a')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Target page: ${escapeHtml(obj.target_page || 'n/a')} · Competitor: ${escapeHtml(obj.competitor_domain || 'n/a')}</div>
+        <div class="card-flat" style="padding:10px;border:1px solid var(--color-border);border-radius:8px">
+          <div class="text-xs" style="font-weight:600;margin-bottom:6px">Evidence</div>
+          ${(obj.evidence || []).map(e => `<div class="text-xs text-muted" style="margin-bottom:4px">- ${escapeHtml(e)}</div>`).join('') || '<div class="text-xs text-muted">No evidence attached</div>'}
+          <div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Why Flagged</div>
+          ${(obj.why_flagged || []).map(e => `<div class="text-xs text-muted" style="margin-bottom:4px">- ${escapeHtml(e)}</div>`).join('') || '<div class="text-xs text-muted">No rationale attached</div>'}
+        </div>
+      `;
+    } else if (kind === 'opportunity') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.title || '')}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">${escapeHtml(obj.type || '')} · urgency ${Math.round((obj.urgency || 0) * 100)}% · confidence ${Math.round((obj.confidence || 0) * 100)}% · citation ${Math.round((obj.citation_probability || 0) * 100)}%</div>
+        ${renderLinkChain(links)}
+        <div class="text-sm" style="margin-bottom:10px">${escapeHtml(obj.description || '')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px"><strong>Rationale:</strong> ${escapeHtml(obj.rationale || 'No rationale provided')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Recommended format: ${escapeHtml(obj.recommended_format || 'n/a')} · target: ${escapeHtml(obj.recommended_target || 'n/a')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Expected impact: ${escapeHtml(obj.expected_impact || 'n/a')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${(obj.recommended_actions || []).map(a => `<span class="tag">${escapeHtml(a)}</span>`).join('')}</div>
+      `;
+    } else if (kind === 'citation_gap') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.gap_type || 'citation_gap')}</strong> · ${escapeHtml(obj.target_topic || '')}</div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">Urgency ${Math.round((obj.urgency_score || 0) * 100)}% · confidence ${Math.round((obj.confidence_score || 0) * 100)}% · citation ${Math.round((obj.citation_probability_score || 0) * 100)}%</div>
+        ${renderLinkChain(links)}
+        <div class="text-xs text-muted" style="margin-bottom:6px">Source: ${escapeHtml(obj.source_type || '')} · ${escapeHtml(obj.source_url || obj.source_entity || 'n/a')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:6px">Competitor URL: ${escapeHtml(obj.competitor_url || 'n/a')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Format: ${escapeHtml(obj.content_format_recommended || '')} · Schema: ${(obj.supporting_schema_recommended || []).map(escapeHtml).join(', ')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:6px"><strong>Missing entities:</strong> ${(obj.missing_entities || []).map(escapeHtml).join(', ') || 'n/a'}</div>
+        <div class="text-xs text-muted" style="margin-bottom:6px"><strong>Missing questions:</strong> ${(obj.missing_questions || []).map(escapeHtml).join(' | ') || 'n/a'}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px"><strong>Human explanation:</strong> ${escapeHtml(obj.human_explanation || obj.expected_outcome || '')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${(obj.proposed_actions || []).map(a => `<span class="tag">${escapeHtml(a)}</span>`).join('')}</div>
+      `;
+    } else if (kind === 'plan') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.name || '')}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">Approval: ${escapeHtml(obj.approval_state || 'pending')} · Impact: ${escapeHtml(obj.estimated_impact || 'n/a')} · Cost est: $${Number(obj.estimated_cost || 0).toFixed(4)}</div>
+        ${renderLinkChain(links)}
+        <div class="text-xs text-muted" style="margin-bottom:8px">${escapeHtml(obj.description || '')}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px"><strong>Why this exists:</strong> ${escapeHtml(obj.why_this_plan_exists || 'No rationale attached')}</div>
+        <ol style="padding-left:18px;font-size:12px;color:var(--color-text-secondary)">${(obj.steps || []).map(s => `<li>${escapeHtml(typeof s === 'string' ? s : `${s.step_type || 'step'} · ${s.provider || 'provider'} · ${s.target || 'target'}${s.approval_required ? ' · approval required' : ''}`)}</li>`).join('')}</ol>
+      `;
+    } else if (kind === 'execution') {
+      const steps = obj.steps || [];
+      const artifacts = (obj.outputs || []).slice(0, 12);
+      const completedSteps = steps.filter(s => s.status === 'completed').length;
+      const progress = steps.length ? Math.round((completedSteps / steps.length) * 100) : 0;
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.id || '')}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">Status: ${escapeHtml(obj.status || '')} · Scope: ${escapeHtml(obj.scope_mode || 'site')} · Priority: ${escapeHtml(obj.priority || 'normal')} · tokens ${(obj.tokens || 0).toLocaleString()} · $${Number(obj.cost || 0).toFixed(4)}</div>
+        ${renderLinkChain(links)}
+        <div class="text-xs text-muted" style="margin-bottom:6px">Started: ${formatDate(obj.started_at)} · Completed: ${formatDate(obj.completed_at)} · Blocking: ${escapeHtml(obj.blocking_reason || 'none')}</div>
+        <div style="margin:10px 0">
+          <div class="text-xs text-muted" style="margin-bottom:4px">Progress: ${progress}% (${completedSteps}/${steps.length || 0})</div>
+          <div style="height:8px;background:var(--color-border);border-radius:6px;overflow:hidden"><div style="height:8px;background:#00c8ff;width:${progress}%"></div></div>
+        </div>
+        <div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Sections: Summary · Timeline · Steps · Outputs · Errors/Warnings · Linked Outcome · Audit</div>
+        <div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Steps</div>
+        ${(steps || []).map(s => `<div class="text-xs text-muted" style="margin-bottom:4px">- [${escapeHtml(s.status || 'queued')}] #${s.sequence || '?'} ${escapeHtml(s.label || s.step_type || '')} · ${escapeHtml(s.provider || '')}${s.depends_on_step_ids?.length ? ` · depends on ${escapeHtml(s.depends_on_step_ids.join(', '))}` : ''}${s.approval_required ? ' · approval required' : ''}${s.error_summary ? ` · ${escapeHtml(s.error_summary)}` : ''}</div>`).join('') || '<div class="text-xs text-muted">No step model available</div>'}
+        <div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Step Logs</div>
+        ${(obj.step_logs || obj.logs || []).map(l => `<div class="text-xs text-muted" style="margin-bottom:4px">- [${escapeHtml(l.status || 'unknown')}] ${escapeHtml(l.timestamp || '')} ${escapeHtml(l.action_type || l.step || '')} ${escapeHtml(l.provider || '')} ${escapeHtml(l.target || '')} ${escapeHtml(l.result || '')}</div>`).join('')}
+        <div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Outputs / Artifacts</div>
+        ${artifacts.map(a => `<div class="text-xs text-muted" style="margin-bottom:6px;padding:6px;border:1px solid var(--color-border);border-radius:6px">
+          <div><strong>${escapeHtml(a.type || 'artifact')}</strong> · ${escapeHtml(a.title || a.artifact_id || '')}</div>
+          <div>publish ${escapeHtml(a.publish_status || 'draft')} · review ${escapeHtml(a.review_status || 'pending')}</div>
+          <div style="margin-top:4px">${escapeHtml(a.preview_text || '')}</div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button class="btn btn-secondary btn-xs artifact-action" data-artifact-id="${escapeHtml(a.artifact_id || '')}" data-action="approve_artifact">Approve artifact</button>
+            <button class="btn btn-secondary btn-xs artifact-action" data-artifact-id="${escapeHtml(a.artifact_id || '')}" data-action="reject_artifact">Reject artifact</button>
+            <button class="btn btn-secondary btn-xs artifact-action" data-artifact-id="${escapeHtml(a.artifact_id || '')}" data-action="mark_ready_publish">Mark ready to publish</button>
+          </div>
+        </div>`).join('') || '<div class="text-xs text-muted">No artifacts yet.</div>'}
+        ${(obj.errors || []).length ? `<div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Errors</div>${(obj.errors || []).map(e => `<div class="text-xs text-muted">- ${escapeHtml(e.category || 'error')}: ${escapeHtml(e.summary || '')}</div>`).join('')}` : ''}
+        ${(obj.warnings || []).length ? `<div class="text-xs" style="font-weight:600;margin:8px 0 6px 0">Warnings</div>${(obj.warnings || []).map(w => `<div class="text-xs text-muted">- ${escapeHtml(w.category || 'warning')}: ${escapeHtml(w.summary || '')}</div>`).join('')}` : ''}
+      `;
+    } else if (kind === 'outcome') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.type || 'Outcome')}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">Measured: ${formatDate(obj.measured_at)} · Confidence ${Math.round((obj.confidence || 0.8) * 100)}%</div>
+        ${renderLinkChain(links)}
+        <div class="text-xs text-muted" style="margin-bottom:6px">Rank: ${escapeHtml(String(obj.baseline_metrics?.avg_position ?? 'n/a'))} -> ${escapeHtml(String(obj.current_metrics?.avg_position ?? 'n/a'))}</div>
+        <div class="text-xs text-muted" style="margin-bottom:6px">Impressions: ${escapeHtml(String(obj.baseline_metrics?.impressions_7d ?? 'n/a'))} -> ${escapeHtml(String(obj.current_metrics?.impressions_7d ?? 'n/a'))}</div>
+        <div class="text-xs text-muted" style="margin-bottom:6px">Citations: ${escapeHtml(String(obj.baseline_metrics?.citations_7d ?? 'n/a'))} -> ${escapeHtml(String(obj.current_metrics?.citations_7d ?? obj.citations_detected ?? 'n/a'))}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px"><strong>Narrative:</strong> ${escapeHtml(obj.narrative_summary || '')}</div>
+        <div class="text-xs text-muted">Evidence sources: ${(obj.evidence_sources || []).map(escapeHtml).join(', ') || 'n/a'}</div>
+      `;
+    } else if (kind === 'competitor') {
+      body = `
+        <div class="text-sm"><strong>${escapeHtml(obj.label || obj.domain)}</strong></div>
+        <div class="text-xs text-muted" style="margin:4px 0 10px 0">${escapeHtml(obj.domain || '')}</div>
+        ${renderLinkChain(links)}
+        <div class="text-xs text-muted" style="margin-bottom:8px">Tracked topics: ${(obj.tracked_topics || []).map(escapeHtml).join(', ') || 'n/a'}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Format patterns: ${(obj.format_patterns || []).map(escapeHtml).join(', ') || 'n/a'}</div>
+        <div class="text-xs text-muted" style="margin-bottom:8px">Schema patterns: ${(obj.schema_patterns || []).map(escapeHtml).join(', ') || 'n/a'}</div>
+        ${(obj.recent_changes || []).map(ch => `<div class="text-xs text-muted">- ${escapeHtml(ch)}</div>`).join('')}
+      `;
+    }
+
+    const actions = getDrawerActions(kind, obj);
+    overlay.innerHTML = `
+      <div class="modal" style="max-width:920px;max-height:85vh;overflow:auto">
+        <div class="modal-header">
+          <h3 class="modal-title">${escapeHtml(kind.replace('_', ' ').toUpperCase())} Detail</h3>
+          <button class="btn btn-ghost btn-icon close-modal"><i data-lucide="x"></i></button>
+        </div>
+        <div class="modal-body">${body}</div>
+        <div class="modal-footer">
+          <button class="btn btn-secondary close-modal">Close</button>
+          ${actions.map(a => `<button class="btn ${a.tone === 'primary' ? 'btn-primary' : 'btn-secondary'} intel-action-btn" data-action="${escapeHtml(a.id)}">${escapeHtml(a.label)}</button>`).join('')}
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    lucide.createIcons({ nodes: [overlay] });
+    overlay.querySelectorAll('.close-modal').forEach(b => b.addEventListener('click', () => overlay.remove()));
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelectorAll('.intel-action-btn').forEach(b => b.addEventListener('click', async () => {
+      const action = b.dataset.action;
+      try {
+        b.disabled = true;
+        const payload = await buildActionPayload(kind, action, obj);
+        if (payload === null) { b.disabled = false; return; }
+        await mutateIntelObject(kind, id, action, payload || {});
+        toast(`Action complete: ${action.replace(/_/g, ' ')}`, 'success');
+        overlay.remove();
+        const main = document.getElementById('main-content');
+        if (main && location.hash === '#/command-center') {
+          renderCommandCenter(main);
+        }
+      } catch (err) {
+        toast(err.message || 'Action failed', 'error');
+        b.disabled = false;
+      }
+    }));
+    overlay.querySelectorAll('.artifact-action').forEach(btn => btn.addEventListener('click', async () => {
+      const artifactId = btn.dataset.artifactId;
+      const action = btn.dataset.action;
+      if (!artifactId || !action) return;
+      try {
+        await mutateIntelObject('artifact', artifactId, action, {});
+        toast(`Artifact action complete: ${action.replace(/_/g, ' ')}`, 'success');
+        overlay.remove();
+        showIntelInspect(kind, id);
+      } catch (err) {
+        toast(err.message || 'Artifact action failed', 'error');
+      }
+    }));
+    overlay.querySelectorAll('.intel-link').forEach(link => {
+      link.addEventListener('click', (e) => {
+        e.preventDefault();
+        const k = link.dataset.kind;
+        const targetId = link.dataset.id;
+        overlay.remove();
+        showIntelInspect(k, targetId, intel);
+      });
+    });
+  }
+
   async function renderCommandCenter(container) {
     let scopeAgents = [];
     let scopeOptions = { github_repos: [], gsc_sites: [], bing_sites: [] };
+    let demoMeta = null;
+    let scenarios = demoScenariosCache;
+    let demoPacks = demoPacksCache;
+    let walkthroughs = walkthroughLibraryCache;
+    let walkthroughStatus = walkthroughStatusCache;
     try {
-      const [agentsRes, optionsRes] = await Promise.all([
+      const [agentsRes, optionsRes, demoStatusRes, scenariosRes, demoPacksRes, wtList, wtStatus] = await Promise.all([
         apiFetch('/api/agents'),
         loadScopeOptions(),
+        loadDemoStatus(),
+        loadDemoScenarios(),
+        loadDemoPacks(),
+        loadWalkthroughLibrary(),
+        loadWalkthroughStatus(),
       ]);
       scopeAgents = agentsRes || [];
       scopeOptions = optionsRes || scopeOptions;
+      demoMeta = demoStatusRes || null;
+      scenarios = scenariosRes || scenarios;
+      demoPacks = demoPacksRes || demoPacks;
+      walkthroughs = wtList || walkthroughs;
+      walkthroughStatus = wtStatus || walkthroughStatus;
     } catch {}
+    let intelPreview = ccIntelCache;
+    try { intelPreview = await loadSearchOpsIntel(); } catch {}
+    const demoStatus = (intelPreview && intelPreview.demo_status) || demoMeta?.status || demoStatusCache || {};
+    const currentScenario = demoStatus?.scenario || null;
+    const currentStage = demoStatus?.current_stage || null;
+    const inPresentationMode = !!demoStatus?.presentation_mode;
+    const wt = walkthroughStatus || demoStatus?.walkthrough || {};
+    const wtCurrent = wt?.current_step || null;
 
     if (ccScope.mode === 'agent' && ccScope.agent_id && !scopeAgents.some(a => a.id === ccScope.agent_id)) {
       ccScope.agent_id = '';
@@ -628,9 +1360,12 @@
 
     const tabs = [
       { id: 'overview', label: 'Overview', icon: 'gauge' },
-      { id: 'seo', label: 'SEO Metrics', icon: 'search' },
-      { id: 'ai-visibility', label: 'AI Visibility', icon: 'eye' },
-      { id: 'llm-conversions', label: 'LLM Conversions', icon: 'trending-up' },
+      { id: 'live-ops', label: 'Live Ops', icon: 'activity' },
+      { id: 'signals', label: 'Signals', icon: 'radio' },
+      { id: 'opportunities', label: 'Opportunities', icon: 'lightbulb' },
+      { id: 'plans', label: 'Plans', icon: 'clipboard-list' },
+      { id: 'executions', label: 'Executions', icon: 'play-circle' },
+      { id: 'outcomes', label: 'Outcomes', icon: 'line-chart' },
       { id: 'competitors', label: 'Competitors', icon: 'swords' },
       { id: 'agent-ops', label: 'Agent Ops', icon: 'activity' },
     ];
@@ -643,11 +1378,100 @@
           </div>
           <div>
             <h1 class="page-title" style="margin:0">Command Center</h1>
-            <p class="page-subtitle" style="margin:0">SEO, AEO, GEO &amp; Agent Intelligence</p>
+            <p class="page-subtitle" style="margin:0">Observe -> Diagnose -> Plan -> Execute -> Measure</p>
           </div>
         </div>
       </div>
       <div class="card" style="margin-bottom:12px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>
+            <div class="text-xs text-muted">Executive Demo Mode</div>
+            <div class="text-sm">${escapeHtml(currentScenario?.name || 'No scenario loaded')} ${currentStage ? `· Stage ${currentStage.sequence || 0}: ${escapeHtml(currentStage.title || '')}` : ''}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="form-select" id="demo-scenario-select" style="min-width:240px">
+              <option value="">Select scenario</option>
+              ${(scenarios || []).map(s => `<option value="${escapeHtml(s.scenario_id)}" ${currentScenario?.scenario_id === s.scenario_id ? 'selected' : ''}>${escapeHtml(s.name)}</option>`).join('')}
+            </select>
+            <select class="form-select" id="demo-mode-select" style="min-width:170px">
+              ${['live_simulated','deterministic_demo','manual_stepthrough'].map(m => `<option value="${m}" ${demoStatus?.mode === m ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')}
+            </select>
+            <button class="btn btn-secondary btn-sm" id="demo-load-btn">Load</button>
+            <button class="btn btn-secondary btn-sm" id="demo-reset-btn">Reset</button>
+            <button class="btn btn-secondary btn-sm" id="demo-tick-btn">Advance Tick</button>
+            <button class="btn btn-secondary btn-sm" id="demo-stage-btn">Advance Stage</button>
+            <button class="btn btn-secondary btn-sm" id="demo-autoplay-btn">${demoStatus?.autoplay ? 'Pause Playback' : 'Auto-play'}</button>
+            <button class="btn btn-secondary btn-sm" id="demo-presentation-btn">${inPresentationMode ? 'Standard Ops Mode' : 'Presentation Mode'}</button>
+            <button class="btn btn-secondary btn-sm" id="demo-recording-btn">${demoStatus?.recording_mode ? 'Recording Mode On' : 'Recording Mode Off'}</button>
+          </div>
+        </div>
+        <div style="margin-top:8px" class="text-xs text-muted">
+          Seed: ${escapeHtml(demoStatus?.seed_key || 'n/a')} · Run: ${escapeHtml(demoStatus?.scenario_run_id || 'n/a')} · Scheduler: ${escapeHtml(demoStatus?.mode || 'deterministic_demo')} · Active Pack: ${escapeHtml((demoStatus?.walkthrough?.active_demo_pack_id) || 'none')}
+        </div>
+        ${demoStatus?.current_stage ? `<div style="margin-top:8px;padding:8px;border:1px dashed var(--color-border);border-radius:8px">
+          <div class="text-xs" style="font-weight:600">${escapeHtml(demoStatus.current_stage.title || '')}</div>
+          <div class="text-xs text-muted">${escapeHtml(demoStatus.current_stage.description || '')}</div>
+          ${(demoStatus?.speaker_notes_visible !== false) ? `<div class="text-xs" style="margin-top:6px"><strong>Speaker note:</strong> ${escapeHtml(demoStatus.current_stage.speaker_notes || '')}</div>` : ''}
+          ${demoStatus?.scenario?.recommended_walkthrough_order?.length ? `<div class="text-xs text-muted" style="margin-top:4px">Suggested next clicks: ${demoStatus.scenario.recommended_walkthrough_order.map(escapeHtml).join(' -> ')}</div>` : ''}
+        </div>` : ''}
+      </div>
+      <div class="card" style="margin-bottom:12px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>
+            <div class="text-xs text-muted">Demo Packs Launcher</div>
+            <div class="text-sm">One-click start for executive, sales, onboarding, technical, and fleet narratives</div>
+          </div>
+          <button class="btn btn-secondary btn-sm" id="demo-pack-end-btn">End Active Pack</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px;margin-top:10px">
+          ${(demoPacks || []).map(p => `
+            <div class="card-flat" style="border:1px solid var(--color-border);border-radius:10px;padding:10px">
+              <div style="font-size:13px;font-weight:600">${escapeHtml(p.name || '')}</div>
+              <div class="text-xs text-muted" style="margin-top:4px">${escapeHtml(p.description || '')}</div>
+              <div class="text-xs text-muted" style="margin-top:6px">${escapeHtml((p.tags || []).join(' · '))}</div>
+              <div class="text-xs" style="margin-top:6px"><strong>Duration:</strong> ${escapeHtml(p.estimated_duration || 'n/a')}</div>
+              <div class="text-xs" style="margin-top:4px"><strong>Proves:</strong> ${escapeHtml(p.what_it_proves || '')}</div>
+              <button class="btn btn-primary btn-sm demo-pack-start" data-pack-id="${escapeHtml(p.demo_pack_id)}" style="margin-top:8px;width:100%">Start Demo Pack</button>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+      <div class="card" style="margin-bottom:12px;padding:12px">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">
+          <div>
+            <div class="text-xs text-muted">Guided Walkthrough</div>
+            <div class="text-sm">${escapeHtml(wt?.walkthrough?.name || 'No walkthrough loaded')} ${wtCurrent ? `· Step ${Number(wt.current_step_index || 0) + 1}` : ''}</div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select class="form-select" id="wt-select" style="min-width:300px">
+              <option value="">Select walkthrough</option>
+              ${(walkthroughs || []).map(w => `<option value="${escapeHtml(w.walkthrough_id)}" ${wt?.walkthrough_id === w.walkthrough_id ? 'selected' : ''}>${escapeHtml(w.name)} · ${escapeHtml(w.audience_type || '')}</option>`).join('')}
+            </select>
+            <select class="form-select" id="wt-mode-select" style="min-width:160px">
+              ${['executive_demo','sales_demo','onboarding','technical_qa','self_guided'].map(m => `<option value="${m}" ${demoStatus?.audience_mode === m ? 'selected' : ''}>${escapeHtml(m)}</option>`).join('')}
+            </select>
+            <button class="btn btn-secondary btn-sm" id="wt-load-btn">Load</button>
+            <button class="btn btn-secondary btn-sm" id="wt-start-btn">Start</button>
+            <button class="btn btn-secondary btn-sm" id="wt-next-btn">Next</button>
+            <button class="btn btn-secondary btn-sm" id="wt-back-btn">Back</button>
+            <button class="btn btn-secondary btn-sm" id="wt-pause-btn">Pause</button>
+            <button class="btn btn-secondary btn-sm" id="wt-end-btn">End</button>
+            <button class="btn btn-secondary btn-sm" id="wt-export-btn">Export</button>
+            <button class="btn btn-secondary btn-sm" id="wt-import-btn">Import</button>
+            <button class="btn btn-secondary btn-sm" id="wt-duplicate-btn">Duplicate</button>
+            <button class="btn btn-secondary btn-sm" id="wt-toggle-speaker-btn">Toggle Speaker Notes</button>
+            <button class="btn btn-secondary btn-sm" id="wt-jump-approval-btn">Jump Approval Moment</button>
+            <button class="btn btn-secondary btn-sm" id="wt-jump-outcome-btn">Skip to Outcome</button>
+          </div>
+        </div>
+        ${wtCurrent ? `<div style="margin-top:8px;padding:8px;border:1px dashed var(--color-border);border-radius:8px">
+          <div class="text-xs" style="font-weight:600">${escapeHtml(wtCurrent.title || '')}</div>
+          <div class="text-xs text-muted">${escapeHtml(wtCurrent.description || '')}</div>
+          <div class="text-xs" style="margin-top:4px"><strong>Expected action:</strong> ${escapeHtml(wtCurrent.expected_user_action || 'Follow instruction')}</div>
+          <div class="text-xs" style="margin-top:4px"><strong>Business value:</strong> ${escapeHtml(wtCurrent.business_value_note || '')}</div>
+        </div>` : '<div class="text-xs text-muted" style="margin-top:8px">Load a walkthrough to activate guided overlays.</div>'}
+      </div>
+      <div class="card" style="margin-bottom:12px;padding:12px;${inPresentationMode ? 'display:none' : ''}">
         <div style="display:grid;grid-template-columns:180px 1fr 1fr 1fr;gap:8px;align-items:end">
           <div class="form-group" style="margin:0">
             <label class="form-label">Scope Mode</label>
@@ -673,6 +1497,33 @@
           </div>
         </div>
       </div>
+      ${renderCCQueueBar(intelPreview || {})}
+      <div class="card" style="margin-bottom:12px;padding:10px;${inPresentationMode ? 'display:none' : ''}">
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:end">
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Status</label>
+            <input class="form-input" id="cc-filter-status" value="${escapeHtml(ccFilter.status === 'all' ? '' : ccFilter.status)}" placeholder="e.g. open, running, dismissed">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Approval Needed</label>
+            <select class="form-select" id="cc-filter-approval">
+              <option value="all" ${ccFilter.approval === 'all' ? 'selected' : ''}>All</option>
+              <option value="required" ${ccFilter.approval === 'required' ? 'selected' : ''}>Required</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label class="form-label">Assigned Agent</label>
+            <select class="form-select" id="cc-filter-agent">
+              <option value="all">All</option>
+              <option value="unassigned" ${ccFilter.assigned_agent === 'unassigned' ? 'selected' : ''}>Unassigned</option>
+              ${scopeAgents.map(a => `<option value="${a.id}" ${ccFilter.assigned_agent === a.id ? 'selected' : ''}>${escapeHtml(a.name || a.id)}</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <button class="btn btn-secondary" id="cc-clear-filters">Clear Filters</button>
+          </div>
+        </div>
+      </div>
       <div class="cc-tabs">
         ${tabs.map(t => `
           <button class="cc-tab ${ccActiveTab === t.id ? 'cc-tab-active' : ''}" data-tab="${t.id}">
@@ -691,6 +1542,10 @@
     const agentWrap = document.getElementById('cc-scope-agent-wrap');
     const siteWrap = document.getElementById('cc-scope-site-wrap');
     const repoWrap = document.getElementById('cc-scope-repo-wrap');
+    const filterStatus = document.getElementById('cc-filter-status');
+    const filterApproval = document.getElementById('cc-filter-approval');
+    const filterAgent = document.getElementById('cc-filter-agent');
+    const clearFilters = document.getElementById('cc-clear-filters');
 
     modeSel?.addEventListener('change', () => {
       ccScope.mode = modeSel.value === 'agent' ? 'agent' : 'site';
@@ -717,6 +1572,197 @@
       siteWrap.style.display = ccScope.mode === 'site' ? '' : 'none';
       repoWrap.style.display = ccScope.mode === 'site' ? '' : 'none';
     }
+    filterStatus?.addEventListener('change', () => {
+      ccFilter.status = (filterStatus.value || '').trim().toLowerCase() || 'all';
+      renderCommandCenter(container);
+    });
+    filterApproval?.addEventListener('change', () => {
+      ccFilter.approval = filterApproval.value || 'all';
+      renderCommandCenter(container);
+    });
+    filterAgent?.addEventListener('change', () => {
+      ccFilter.assigned_agent = filterAgent.value || 'all';
+      renderCommandCenter(container);
+    });
+    clearFilters?.addEventListener('click', () => {
+      ccFilter = { status: 'all', approval: 'all', assigned_agent: 'all', object_type: 'all' };
+      renderCommandCenter(container);
+    });
+    container.querySelectorAll('.cc-queue-chip').forEach(btn => btn.addEventListener('click', () => {
+      ccActiveTab = btn.dataset.tab || ccActiveTab;
+      ccFilter.status = (btn.dataset.status || '').toLowerCase() || 'all';
+      renderCommandCenter(container);
+    }));
+    document.getElementById('demo-load-btn')?.addEventListener('click', async () => {
+      const scenarioId = document.getElementById('demo-scenario-select')?.value;
+      const mode = document.getElementById('demo-mode-select')?.value || 'deterministic_demo';
+      if (!scenarioId) return toast('Select a scenario first', 'warning');
+      try {
+        await demoAction('/api/demo/scenario/load', { scenario_id: scenarioId, mode });
+        toast('Scenario loaded', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Failed to load scenario', 'error'); }
+    });
+    document.getElementById('demo-reset-btn')?.addEventListener('click', async () => {
+      try { await demoAction('/api/demo/scenario/reset'); toast('Scenario reset', 'success'); renderCommandCenter(container); } catch (err) { toast(err.message || 'Reset failed', 'error'); }
+    });
+    document.getElementById('demo-tick-btn')?.addEventListener('click', async () => {
+      try { await demoAction('/api/demo/scenario/advance-tick'); toast('Advanced one tick', 'success'); renderCommandCenter(container); } catch (err) { toast(err.message || 'Tick failed', 'error'); }
+    });
+    document.getElementById('demo-stage-btn')?.addEventListener('click', async () => {
+      try { await demoAction('/api/demo/scenario/advance-stage'); toast('Advanced one stage', 'success'); renderCommandCenter(container); } catch (err) { toast(err.message || 'Stage advance failed', 'error'); }
+    });
+    document.getElementById('demo-autoplay-btn')?.addEventListener('click', async () => {
+      try {
+        if (demoStatus?.autoplay) await demoAction('/api/demo/scenario/stop');
+        else await demoAction('/api/demo/scenario/autoplay', { enabled: true, speed_multiplier: demoStatus?.speed_multiplier || 1 });
+        toast(demoStatus?.autoplay ? 'Playback paused' : 'Auto-play started', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Playback toggle failed', 'error'); }
+    });
+    document.getElementById('demo-presentation-btn')?.addEventListener('click', async () => {
+      try {
+        await demoAction('/api/demo/scenario/settings', { presentation_mode: !inPresentationMode });
+        toast(!inPresentationMode ? 'Presentation mode enabled' : 'Standard ops mode restored', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Mode switch failed', 'error'); }
+    });
+    document.getElementById('demo-recording-btn')?.addEventListener('click', async () => {
+      try {
+        await demoAction('/api/demo/scenario/settings', { recording_mode: !demoStatus?.recording_mode });
+        toast(!demoStatus?.recording_mode ? 'Recording-friendly mode enabled' : 'Recording-friendly mode disabled', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Recording mode toggle failed', 'error'); }
+    });
+    container.querySelectorAll('.demo-pack-start').forEach(btn => btn.addEventListener('click', async () => {
+      const packId = btn.dataset.packId;
+      if (!packId) return;
+      try {
+        const res = await apiFetch('/api/demo/demo-pack/start', { method: 'POST', body: JSON.stringify({ demo_pack_id: packId }) });
+        demoStatusCache = res.status || demoStatusCache;
+        walkthroughStatusCache = res.walkthrough_status || walkthroughStatusCache;
+        ccIntelCache = res.intelligence || ccIntelCache;
+        toast('Demo environment ready', 'success');
+        const pack = res.demo_pack || {};
+        if (pack.start_tab) ccActiveTab = pack.start_tab;
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Demo pack start failed', 'error'); }
+    }));
+    document.getElementById('demo-pack-end-btn')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/demo-pack/end', { method: 'POST' });
+        await demoAction('/api/demo/scenario/settings', { presentation_mode: false, recording_mode: false });
+        clearWalkthroughOverlay();
+        toast('Demo pack ended. Returned to standard ops mode.', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Failed to end demo pack', 'error'); }
+    });
+    document.getElementById('wt-load-btn')?.addEventListener('click', async () => {
+      const walkthroughId = document.getElementById('wt-select')?.value;
+      const audience = document.getElementById('wt-mode-select')?.value || 'technical_qa';
+      if (!walkthroughId) return toast('Select walkthrough first', 'warning');
+      try {
+        await apiFetch('/api/demo/walkthrough/load', { method: 'POST', body: JSON.stringify({ walkthrough_id: walkthroughId, audience_type: audience, auto_start: false }) });
+        await loadWalkthroughStatus();
+        toast('Walkthrough loaded', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Walkthrough load failed', 'error'); }
+    });
+    document.getElementById('wt-start-btn')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/walkthrough/start', { method: 'POST' });
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+        toast('Walkthrough started', 'success');
+      } catch (err) { toast(err.message || 'Start failed', 'error'); }
+    });
+    document.getElementById('wt-next-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await apiFetch('/api/demo/walkthrough/next', { method: 'POST' });
+        if (res.validation && !res.validation.ok) toast(res.validation.message || 'Step not complete', 'warning');
+        await loadSearchOpsIntel();
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Next failed', 'error'); }
+    });
+    document.getElementById('wt-back-btn')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/walkthrough/back', { method: 'POST' });
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Back failed', 'error'); }
+    });
+    document.getElementById('wt-pause-btn')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/walkthrough/pause', { method: 'POST' });
+        clearWalkthroughOverlay();
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Pause failed', 'error'); }
+    });
+    document.getElementById('wt-end-btn')?.addEventListener('click', async () => {
+      try {
+        await apiFetch('/api/demo/walkthrough/end', { method: 'POST' });
+        clearWalkthroughOverlay();
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'End failed', 'error'); }
+    });
+    document.getElementById('wt-export-btn')?.addEventListener('click', async () => {
+      try {
+        const exp = await apiFetch('/api/demo/walkthrough/export');
+        const text = JSON.stringify(exp.library || [], null, 2);
+        prompt('Copy walkthrough JSON export:', text);
+      } catch (err) { toast(err.message || 'Export failed', 'error'); }
+    });
+    document.getElementById('wt-import-btn')?.addEventListener('click', async () => {
+      const raw = prompt('Paste walkthrough JSON object to import:');
+      if (!raw) return;
+      try {
+        const walkthrough = JSON.parse(raw);
+        await apiFetch('/api/demo/walkthrough/import', { method: 'POST', body: JSON.stringify({ walkthrough }) });
+        toast('Walkthrough imported', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Import failed', 'error'); }
+    });
+    document.getElementById('wt-duplicate-btn')?.addEventListener('click', async () => {
+      const selected = walkthroughs.find(w => w.walkthrough_id === document.getElementById('wt-select')?.value);
+      if (!selected) return toast('Select walkthrough to duplicate', 'warning');
+      try {
+        const exp = await apiFetch('/api/demo/walkthrough/export');
+        const full = (exp.library || []).find(w => w.walkthrough_id === selected.walkthrough_id);
+        if (!full) return toast('Walkthrough definition unavailable', 'error');
+        const clone = { ...full, walkthrough_id: `${full.walkthrough_id}_copy_${Date.now()}`, name: `${full.name} (Copy)` };
+        await apiFetch('/api/demo/walkthrough/import', { method: 'POST', body: JSON.stringify({ walkthrough: clone }) });
+        toast('Walkthrough duplicated', 'success');
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Duplicate failed', 'error'); }
+    });
+    document.getElementById('wt-toggle-speaker-btn')?.addEventListener('click', async () => {
+      try {
+        await demoAction('/api/demo/scenario/settings', { speaker_notes_visible: !demoStatus?.speaker_notes_visible });
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Toggle failed', 'error'); }
+    });
+    document.getElementById('wt-jump-approval-btn')?.addEventListener('click', async () => {
+      try {
+        for (let i = 0; i < 4; i += 1) {
+          await demoAction('/api/demo/scenario/advance-stage');
+          const statusRes = await loadDemoStatus();
+          const pending = (statusRes?.story?.approvals || []).length || (ccIntelCache?.approval_queue || []).length;
+          if (pending > 0) break;
+        }
+        ccActiveTab = 'overview';
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Jump failed', 'error'); }
+    });
+    document.getElementById('wt-jump-outcome-btn')?.addEventListener('click', async () => {
+      try {
+        for (let i = 0; i < 4; i += 1) await demoAction('/api/demo/scenario/advance-stage');
+        ccActiveTab = 'outcomes';
+        renderCommandCenter(container);
+      } catch (err) { toast(err.message || 'Jump failed', 'error'); }
+    });
 
     // Bind tab clicks
     container.querySelectorAll('.cc-tab').forEach(btn => {
@@ -734,18 +1780,35 @@
     if (!ccEl) return;
 
     if (ccActiveTab === 'overview') await renderCCOverview(ccEl);
-    else if (ccActiveTab === 'seo') await renderCCSEO(ccEl);
-    else if (ccActiveTab === 'ai-visibility') renderCCAIVisibility(ccEl);
-    else if (ccActiveTab === 'llm-conversions') renderCCLLMConversions(ccEl);
-    else if (ccActiveTab === 'competitors') renderCCCompetitors(ccEl);
+    else if (ccActiveTab === 'live-ops') await renderCCLiveOps(ccEl);
+    else if (ccActiveTab === 'signals') await renderCCSignals(ccEl);
+    else if (ccActiveTab === 'opportunities') await renderCCOpportunities(ccEl);
+    else if (ccActiveTab === 'plans') await renderCCPlans(ccEl);
+    else if (ccActiveTab === 'executions') await renderCCExecutions(ccEl);
+    else if (ccActiveTab === 'outcomes') await renderCCOutcomes(ccEl);
+    else if (ccActiveTab === 'competitors') await renderCCCompetitorsOps(ccEl);
     else if (ccActiveTab === 'agent-ops') await renderCCAgentOps(ccEl);
+    if ((walkthroughStatusCache || demoStatus?.walkthrough)?.walkthrough_active) {
+      try {
+        const st = await loadWalkthroughStatus();
+        renderWalkthroughOverlay(st);
+      } catch {}
+    } else {
+      clearWalkthroughOverlay();
+    }
   }
 
   // ── CC: OVERVIEW TAB ──
   async function renderCCOverview(el) {
     el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      const data = await apiFetch(`/api/command-center/overview${getCCScopeQuery()}`);
+      const [data, intel] = await Promise.all([
+        apiFetch(`/api/command-center/overview${getCCScopeQuery()}`),
+        loadSearchOpsIntel(),
+      ]);
+      const loop = intel.lifecycle_counts || {};
+      const k = intel.kpis || {};
+      const story = intel.scenario_story || {};
       el.innerHTML = `
         <div class="cc-kpi-grid">
           <div class="cc-kpi">
@@ -756,74 +1819,530 @@
             </div>
           </div>
           <div class="cc-kpi">
-            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="bot" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-icon" style="background:rgba(0,200,255,0.1);color:#00c8ff"><i data-lucide="radio" style="width:18px;height:18px"></i></div>
             <div class="cc-kpi-body">
-              <div class="cc-kpi-value">${data.agents.total}</div>
-              <div class="cc-kpi-label">Agents <span class="badge badge-active">${data.agents.active} active</span></div>
+              <div class="cc-kpi-value">${k.signals_detected_today || 0}</div>
+              <div class="cc-kpi-label">Signals Today</div>
             </div>
           </div>
           <div class="cc-kpi">
-            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="zap" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-icon" style="background:rgba(124,58,237,0.1);color:#7c3aed"><i data-lucide="lightbulb" style="width:18px;height:18px"></i></div>
             <div class="cc-kpi-body">
-              <div class="cc-kpi-value">${(data.agents.total_tokens || 0).toLocaleString()}</div>
-              <div class="cc-kpi-label">Total Tokens</div>
+              <div class="cc-kpi-value">${k.opportunities_open || 0}</div>
+              <div class="cc-kpi-label">Open Opportunities</div>
             </div>
           </div>
           <div class="cc-kpi">
-            <div class="cc-kpi-icon" style="background:rgba(245,158,11,0.1);color:#f59e0b"><i data-lucide="dollar-sign" style="width:18px;height:18px"></i></div>
+            <div class="cc-kpi-icon" style="background:rgba(16,185,129,0.1);color:#10b981"><i data-lucide="line-chart" style="width:18px;height:18px"></i></div>
             <div class="cc-kpi-body">
-              <div class="cc-kpi-value">$${(data.cost_total_usd || 0).toFixed(4)}</div>
-              <div class="cc-kpi-label">Total Cost (recent)</div>
+              <div class="cc-kpi-value">${k.estimated_visibility_lift || 0}%</div>
+              <div class="cc-kpi-label">Estimated Visibility Lift</div>
             </div>
           </div>
         </div>
 
         <div class="cc-grid-2">
           <div class="card">
-            <div class="card-header"><h3 class="card-title">Connected Services</h3></div>
+            <div class="card-header"><h3 class="card-title">Operating Loop Summary</h3></div>
             <div class="cc-services-list">
-              ${data.connected_services.length === 0
-                ? '<p class="text-sm text-muted" style="padding:12px 0">No services connected. Go to <a href="#/connections">Connections</a> to set up.</p>'
-                : data.connected_services.map(s => `
-                    <div class="cc-service-item">
-                      <span class="cc-service-dot cc-service-dot-active"></span>
-                      <span>${escapeHtml(s.replace(/_/g, ' '))}</span>
-                    </div>
-                  `).join('')
-              }
+              ${[
+                ['Observe', loop.observe || 0],
+                ['Diagnose', loop.diagnose || 0],
+                ['Plan', loop.plan || 0],
+                ['Execute', loop.execute || 0],
+                ['Measure', loop.measure || 0],
+              ].map(([label, value]) => `
+                <div class="cc-service-item">
+                  <span class="cc-service-dot cc-service-dot-active"></span>
+                  <span>${label}</span>
+                  <strong style="margin-left:auto">${value}</strong>
+                </div>
+              `).join('')}
             </div>
           </div>
           <div class="card">
-            <div class="card-header"><h3 class="card-title">Recent Activity</h3></div>
-            ${data.recent_runs.length === 0
-              ? '<p class="text-sm text-muted" style="padding:12px 0">No recent runs yet.</p>'
+            <div class="card-header"><h3 class="card-title">Top Citation Gaps</h3></div>
+            ${(intel.citation_gaps || []).length === 0
+              ? '<p class="text-sm text-muted" style="padding:12px 0">No citation gaps detected.</p>'
               : `<div class="cc-activity-list">
-                  ${data.recent_runs.slice(0, 8).map(r => `
+                  ${(intel.citation_gaps || []).slice(0, 4).map(r => `
                     <div class="cc-activity-item">
-                      <span class="badge badge-${r.status}" style="font-size:10px">${r.status}</span>
-                      <span class="cc-activity-text">${escapeHtml(r.input_preview || '—')}</span>
-                      <span class="cc-activity-meta">${r.total_tokens || 0} tok · ${timeAgo(r.started_at)}</span>
+                      <span class="badge badge-warning" style="font-size:10px">${escapeHtml(r.gap_type || 'gap')}</span>
+                      <span class="cc-activity-text">${escapeHtml(r.target_topic || '—')}</span>
+                      <span class="cc-activity-meta">urgency ${Math.round((r.urgency_score || 0) * 100)}%</span>
+                      <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('citation_gap','${escapeHtml(r.gap_id || r.id)}')">Inspect</button>
                     </div>
                   `).join('')}
                 </div>`
             }
           </div>
         </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Scenario Story Panel</h3></div>
+          <div class="text-xs text-muted" style="margin-bottom:8px">${escapeHtml(story.current_stage?.description || 'No scenario stage active. Load a scenario from the demo controls above.')}</div>
+          <div class="text-xs" style="margin-bottom:8px"><strong>What happened:</strong> ${escapeHtml(story.current_stage?.title || 'Idle')}</div>
+          <div class="text-xs" style="margin-bottom:8px"><strong>What is expected next:</strong> ${escapeHtml((story.suggested_next_click_path || []).join(' -> ') || 'Select scenario and advance stage')}</div>
+          <div class="text-xs"><strong>Relevant outputs:</strong> ${(story.recent_outputs || []).slice(0, 3).map(o => escapeHtml(o.title || o.artifact_id || '')).join(', ') || 'none yet'}</div>
+        </div>
+
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Approval Queue</h3></div>
+          ${(intel.approval_queue || []).length === 0
+            ? '<p class="text-sm text-muted" style="padding:12px 0">No items currently awaiting approval.</p>'
+            : `<table class="cc-table">
+                <thead><tr><th>Type</th><th>Title</th><th>Reason</th><th>Urgency</th><th>Actions</th></tr></thead>
+                <tbody>
+                  ${(intel.approval_queue || []).slice(0, 12).map(item => `
+                    <tr>
+                      <td>${escapeHtml(item.object_type || '')}</td>
+                      <td>${escapeHtml(item.title || item.object_id || '')}</td>
+                      <td>${escapeHtml(item.triggering_reason || item.approval_requirement_type || '')}</td>
+                      <td><span class="badge badge-${item.urgency === 'high' ? 'failed' : 'warning'}">${escapeHtml(item.urgency || 'medium')}</span></td>
+                      <td style="display:flex;gap:6px">
+                        <button class="btn btn-secondary btn-xs cc-approval-action" data-aid="${escapeHtml(item.approval_id || '')}" data-kind="${escapeHtml(item.object_type)}" data-id="${escapeHtml(item.object_id)}" data-action="approve">Approve</button>
+                        <button class="btn btn-secondary btn-xs cc-approval-action" data-aid="${escapeHtml(item.approval_id || '')}" data-kind="${escapeHtml(item.object_type)}" data-id="${escapeHtml(item.object_id)}" data-action="reject">Reject</button>
+                        <button class="btn btn-ghost btn-xs cc-approval-inspect" data-kind="${escapeHtml(item.object_type)}" data-id="${escapeHtml(item.object_id)}" data-parent-execution-id="${escapeHtml(item.parent_execution_id || '')}">Inspect</button>
+                      </td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>`
+          }
+        </div>
 
         <div class="card" style="margin-top:16px">
           <div class="card-header"><h3 class="card-title">Quick Navigation</h3></div>
           <div class="cc-quick-nav">
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=seo]').click()"><i data-lucide="search" style="width:16px;height:16px"></i>SEO Metrics</button>
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=ai-visibility]').click()"><i data-lucide="eye" style="width:16px;height:16px"></i>AI Visibility</button>
-            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=llm-conversions]').click()"><i data-lucide="trending-up" style="width:16px;height:16px"></i>LLM Conversions</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=signals]').click()"><i data-lucide="radio" style="width:16px;height:16px"></i>Signals</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=live-ops]').click()"><i data-lucide="activity" style="width:16px;height:16px"></i>Live Ops</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=opportunities]').click()"><i data-lucide="lightbulb" style="width:16px;height:16px"></i>Opportunities</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=plans]').click()"><i data-lucide="clipboard-list" style="width:16px;height:16px"></i>Plans</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=executions]').click()"><i data-lucide="play-circle" style="width:16px;height:16px"></i>Executions</button>
+            <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=outcomes]').click()"><i data-lucide="line-chart" style="width:16px;height:16px"></i>Outcomes</button>
             <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=competitors]').click()"><i data-lucide="swords" style="width:16px;height:16px"></i>Competitors</button>
             <button class="cc-quick-btn" onclick="document.querySelector('[data-tab=agent-ops]').click()"><i data-lucide="activity" style="width:16px;height:16px"></i>Agent Ops</button>
           </div>
         </div>
       `;
       lucide.createIcons();
+      el.querySelectorAll('.cc-approval-inspect').forEach(btn => btn.addEventListener('click', () => {
+        const raw = btn.dataset.kind;
+        if (raw === 'execution_step') {
+          const parentExe = btn.dataset.parentExecutionId;
+          if (parentExe) return window.NC.inspectIntelObject('execution', parentExe);
+        }
+        const kind = raw === 'execution' ? 'execution' : 'plan';
+        window.NC.inspectIntelObject(kind, btn.dataset.id);
+      }));
+      el.querySelectorAll('.cc-approval-action').forEach(btn => btn.addEventListener('click', async () => {
+        const approvalId = btn.dataset.aid;
+        const rawKind = btn.dataset.kind;
+        const id = btn.dataset.id;
+        const action = btn.dataset.action;
+        let affectedKind = rawKind || 'item';
+        try {
+          if (approvalId) {
+            const reason = action === 'reject' ? (prompt('Rejection reason:', '') || '') : '';
+            await mutateIntelObject('approval', approvalId, action, { reason });
+            affectedKind = 'approval';
+          } else {
+            const kind = rawKind === 'execution' ? 'execution' : 'plan';
+            const mappedAction = action === 'approve' ? (kind === 'plan' ? 'approve' : 'approve_blocked') : (kind === 'plan' ? 'reject' : 'cancel');
+            await mutateIntelObject(kind, id, mappedAction, {});
+            affectedKind = kind;
+          }
+          toast(`${action === 'approve' ? 'Approved' : 'Rejected'} ${affectedKind}`, 'success');
+          renderCCOverview(el);
+        } catch (err) {
+          toast(err.message || 'Approval action failed', 'error');
+        }
+      }));
     } catch (err) {
       el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load overview</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCLiveOps(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const live = intel.live_ops || {};
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-blue">Live Operations</span>
+          <span class="text-sm text-muted">Runtime visibility for running, blocked, approval, and failed workloads</span>
+        </div>
+        <div class="cc-kpi-grid">
+          <div class="cc-kpi"><div class="cc-kpi-body"><div class="cc-kpi-value">${(live.running_executions || []).length}</div><div class="cc-kpi-label">Running</div></div></div>
+          <div class="cc-kpi"><div class="cc-kpi-body"><div class="cc-kpi-value">${(live.blocked_executions || []).length}</div><div class="cc-kpi-label">Blocked</div></div></div>
+          <div class="cc-kpi"><div class="cc-kpi-body"><div class="cc-kpi-value">${(live.awaiting_approval || []).length}</div><div class="cc-kpi-label">Awaiting Approval</div></div></div>
+          <div class="cc-kpi"><div class="cc-kpi-body"><div class="cc-kpi-value">${(live.failed_needs_review || []).length}</div><div class="cc-kpi-label">Failed / Review</div></div></div>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-header"><h3 class="card-title">Live Runs</h3></div>
+          <table class="cc-table">
+            <thead><tr><th>Execution</th><th>Agent</th><th>Current Step</th><th>Progress</th><th>Blocking</th><th>Actions</th></tr></thead>
+            <tbody>
+              ${(intel.executions || []).filter(e => ['running','queued','failed','needs_review'].includes(e.status)).map(e => {
+                const steps = e.steps || [];
+                const done = steps.filter(s => s.status === 'completed').length;
+                const progress = steps.length ? Math.round((done / steps.length) * 100) : 0;
+                const current = steps.find(s => ['running','queued','awaiting_approval','waiting_dependency','failed'].includes(s.status));
+                return `<tr>
+                  <td>${escapeHtml(e.id || '')}</td>
+                  <td>${escapeHtml(e.agent_name || e.agent_id || '')}</td>
+                  <td>${escapeHtml(current?.label || 'n/a')}</td>
+                  <td>${progress}%</td>
+                  <td>${escapeHtml(e.blocking_reason || 'none')}</td>
+                  <td style="display:flex;gap:6px">
+                    <button class="btn btn-ghost btn-xs live-inspect" data-id="${escapeHtml(e.id)}">Inspect</button>
+                    <button class="btn btn-secondary btn-xs live-action" data-id="${escapeHtml(e.id)}" data-action="pause">Pause</button>
+                    <button class="btn btn-secondary btn-xs live-action" data-id="${escapeHtml(e.id)}" data-action="approve_blocked">Approve</button>
+                    <button class="btn btn-secondary btn-xs live-action" data-id="${escapeHtml(e.id)}" data-action="retry_step">Retry</button>
+                    <button class="btn btn-secondary btn-xs live-action" data-id="${escapeHtml(e.id)}" data-action="cancel">Cancel</button>
+                  </td>
+                </tr>`;
+              }).join('')}
+              ${((intel.executions || []).filter(e => ['running','queued','failed','needs_review'].includes(e.status)).length === 0) ? '<tr><td colspan="6" class="text-muted">No active runs.</td></tr>' : ''}
+            </tbody>
+          </table>
+        </div>
+        <div class="card" style="margin-top:12px">
+          <div class="card-header"><h3 class="card-title">Ops Throughput</h3></div>
+          <div class="text-xs text-muted" style="padding:8px 0">
+            Queue backlog: ${live.queue_backlog || 0} · Active agents: ${live.agents_currently_active || 0} · Avg completion: ${live.avg_completion_seconds || 0}s · Token burn: ${(live.token_burn || 0).toLocaleString()} · Cost burn: $${Number(live.cost_burn || 0).toFixed(4)}
+          </div>
+        </div>
+      `;
+      el.querySelectorAll('.live-inspect').forEach(btn => btn.addEventListener('click', () => window.NC.inspectIntelObject('execution', btn.dataset.id)));
+      el.querySelectorAll('.live-action').forEach(btn => btn.addEventListener('click', async () => {
+        try {
+          await mutateIntelObject('execution', btn.dataset.id, btn.dataset.action, {});
+          toast(`Execution action: ${btn.dataset.action}`, 'success');
+          renderCCLiveOps(el);
+        } catch (err) {
+          toast(err.message || 'Live action failed', 'error');
+        }
+      }));
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load live operations</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCSignals(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const signals = (intel.signals || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge">Signals</span>
+          <span class="text-sm text-muted">Live intelligence feed from connected sources</span>
+        </div>
+        <div class="card" style="margin-bottom:10px;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="text-xs text-muted">Batch Actions (${ccSelection.signals.size} selected)</span>
+          <button class="btn btn-secondary btn-xs signals-bulk" data-action="dismiss">Dismiss selected</button>
+          <button class="btn btn-secondary btn-xs signals-bulk" data-action="snooze">Snooze selected</button>
+          <button class="btn btn-secondary btn-xs signals-bulk" data-action="assign">Assign selected</button>
+          <button class="btn btn-primary btn-xs signals-bulk" data-action="create_opportunity">Convert selected to opportunities</button>
+        </div>
+        <div class="card">
+          ${signals.map(s => `
+            <div class="cc-activity-item" style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+              <input type="checkbox" class="cc-select-signal" data-id="${escapeHtml(s.id)}" ${ccSelection.signals.has(s.id) ? 'checked' : ''} />
+              <span class="badge badge-${s.severity === 'high' ? 'failed' : s.severity === 'medium' ? 'warning' : 'active'}">${escapeHtml(s.severity || 'low')}</span>
+              <div class="cc-activity-detail">
+                <span class="cc-activity-agent">${escapeHtml(s.title)}</span>
+                <span class="cc-activity-text">${escapeHtml(s.description || '')}</span>
+                <span class="cc-activity-meta">${escapeHtml((s.source || '').replace(/_/g, ' '))} · status ${escapeHtml(s.status || 'new')} · confidence ${Math.round((s.confidence || 0) * 100)}% · ${escapeHtml(s.topic || '')} · ${(s.linked_opportunity_ids || []).length} opportunity link(s)</span>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('signal','${escapeHtml(s.id)}')">Inspect</button>
+            </div>
+          `).join('') || '<p class="text-sm text-muted">No signals available.</p>'}
+        </div>`;
+      lucide.createIcons();
+      el.querySelectorAll('.cc-select-signal').forEach(chk => chk.addEventListener('change', () => {
+        const id = chk.dataset.id;
+        if (chk.checked) ccSelection.signals.add(id); else ccSelection.signals.delete(id);
+        renderCCSignals(el);
+      }));
+      el.querySelectorAll('.signals-bulk').forEach(btn => btn.addEventListener('click', async () => {
+        if (!ccSelection.signals.size) return toast('No signals selected', 'warning');
+        const action = btn.dataset.action;
+        try {
+          const payload = action === 'assign'
+            ? { agent_id: prompt('Assign to agent ID:'), agent_name: prompt('Agent display name (optional):', '') || '' }
+            : {};
+          if (action === 'assign' && !payload.agent_id) return;
+          await batchMutateIntelObjects('signal', Array.from(ccSelection.signals), action, payload);
+          ccSelection.signals.clear();
+          toast(`Batch action complete: ${action}`, 'success');
+          renderCCSignals(el);
+        } catch (err) {
+          toast(err.message || 'Batch action failed', 'error');
+        }
+      }));
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load signals</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCOpportunities(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const opportunities = (intel.opportunities || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-purple">Opportunities</span>
+          <span class="text-sm text-muted">Signals translated into actionable growth opportunities</span>
+        </div>
+        <div class="card" style="margin-bottom:10px;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="text-xs text-muted">Batch Actions (${ccSelection.opportunities.size} selected)</span>
+          <button class="btn btn-secondary btn-xs opp-bulk" data-action="assign">Assign selected</button>
+          <button class="btn btn-primary btn-xs opp-bulk" data-action="create_plan">Create plans in batch</button>
+          <button class="btn btn-secondary btn-xs opp-bulk" data-action="dismiss">Dismiss selected</button>
+          <button class="btn btn-secondary btn-xs opp-bulk" data-action="escalate_priority">Escalate selected</button>
+        </div>
+        <div class="cc-grid-2">
+          ${opportunities.map(o => `
+            <div class="card">
+              <div class="card-header">
+                <input type="checkbox" class="cc-select-opportunity" data-id="${escapeHtml(o.id)}" ${ccSelection.opportunities.has(o.id) ? 'checked' : ''} />
+                <h3 class="card-title">${escapeHtml(o.title || '')}</h3>
+                <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('opportunity','${escapeHtml(o.id)}')">Inspect</button>
+              </div>
+              <div class="text-sm text-muted" style="margin-bottom:8px">${escapeHtml(o.description || '')}</div>
+              <div class="text-xs text-muted" style="margin-bottom:8px">Format: ${escapeHtml(o.recommended_format || 'n/a')}</div>
+              <div class="text-xs text-muted" style="margin-bottom:12px">Target: ${escapeHtml(o.recommended_target || 'n/a')}</div>
+              <div class="text-xs text-muted" style="margin-bottom:8px">Status: ${escapeHtml(o.status || 'open')} · Chain: ${(o.signal_ids || []).length} signal(s) -> ${(o.linked_plan_ids || []).length} plan(s)</div>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px">
+                ${(o.recommended_actions || []).map(a => `<span class="tag">${escapeHtml(a)}</span>`).join('')}
+              </div>
+              <div class="text-xs text-muted">Impact ${escapeHtml(o.expected_impact || '')}</div>
+            </div>
+          `).join('')}
+        </div>`;
+      if ((intel.citation_gaps || []).length) {
+        el.innerHTML += `
+          <div class="cc-section-header" style="margin-top:16px">
+            <span class="cc-section-badge cc-badge-orange">Citation Gap Engine</span>
+            <span class="text-sm text-muted">Machine + human gap rationale</span>
+          </div>
+          <div class="card">
+            ${(intel.citation_gaps || []).filter(matchesCCFilter).map(g => `
+              <div class="cc-activity-item" style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+                <span class="badge badge-warning">${escapeHtml(g.gap_type || 'gap')}</span>
+                <div class="cc-activity-detail">
+                  <span class="cc-activity-agent">${escapeHtml(g.target_topic || '')}</span>
+                  <span class="cc-activity-text">${escapeHtml(g.human_explanation || g.expected_outcome || '')}</span>
+                  <span class="cc-activity-meta">${escapeHtml(g.content_format_recommended || '')} · citation ${Math.round((g.citation_probability_score || 0) * 100)}%</span>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('citation_gap','${escapeHtml(g.gap_id || g.id)}')">Inspect</button>
+              </div>
+            `).join('')}
+          </div>`;
+      }
+      lucide.createIcons();
+      el.querySelectorAll('.cc-select-opportunity').forEach(chk => chk.addEventListener('change', () => {
+        const id = chk.dataset.id;
+        if (chk.checked) ccSelection.opportunities.add(id); else ccSelection.opportunities.delete(id);
+        renderCCOpportunities(el);
+      }));
+      el.querySelectorAll('.opp-bulk').forEach(btn => btn.addEventListener('click', async () => {
+        if (!ccSelection.opportunities.size) return toast('No opportunities selected', 'warning');
+        const action = btn.dataset.action;
+        try {
+          const payload = action === 'assign'
+            ? { agent_id: prompt('Assign to agent ID:'), agent_name: prompt('Agent display name (optional):', '') || '' }
+            : {};
+          if (action === 'assign' && !payload.agent_id) return;
+          await batchMutateIntelObjects('opportunity', Array.from(ccSelection.opportunities), action, payload);
+          ccSelection.opportunities.clear();
+          toast(`Batch action complete: ${action}`, 'success');
+          renderCCOpportunities(el);
+        } catch (err) {
+          toast(err.message || 'Batch action failed', 'error');
+        }
+      }));
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load opportunities</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCPlans(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const plans = (intel.plans || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-orange">Plans</span>
+          <span class="text-sm text-muted">Multi-step strategies linked to opportunities</span>
+        </div>
+        <div class="card" style="margin-bottom:10px;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="text-xs text-muted">Batch Actions (${ccSelection.plans.size} selected)</span>
+          <button class="btn btn-primary btn-xs plans-bulk" data-action="approve">Approve selected</button>
+          <button class="btn btn-secondary btn-xs plans-bulk" data-action="assign">Assign selected</button>
+          <button class="btn btn-secondary btn-xs plans-bulk" data-action="cancel">Cancel selected</button>
+        </div>
+        ${plans.map(p => `
+          <div class="card" style="margin-bottom:12px">
+            <div class="card-header">
+              <input type="checkbox" class="cc-select-plan" data-id="${escapeHtml(p.id)}" ${ccSelection.plans.has(p.id) ? 'checked' : ''} />
+              <h3 class="card-title">${escapeHtml(p.name || '')}</h3>
+              <div style="display:flex;gap:6px;align-items:center">
+                <span class="badge badge-${p.approval_state === 'approved' ? 'active' : 'warning'}">${escapeHtml(p.approval_state || 'pending')}</span>
+                <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('plan','${escapeHtml(p.id)}')">Inspect</button>
+              </div>
+            </div>
+            <p class="text-sm text-muted">${escapeHtml(p.description || '')}</p>
+            <ol style="padding-left:18px;font-size:13px;color:var(--color-text-secondary);margin:8px 0">
+              ${(p.steps || []).map(s => {
+                if (typeof s === 'string') return `<li>${escapeHtml(s)}</li>`;
+                return `<li>${escapeHtml(`${s.step_type || 'step'} · ${s.provider || 'provider'} · ${s.target || 'target'}${s.approval_required ? ' · approval required' : ''}`)}</li>`;
+              }).join('')}
+            </ol>
+            <div class="text-xs text-muted">Estimated impact: ${escapeHtml(p.estimated_impact || 'n/a')} · Status: ${escapeHtml(p.status || 'n/a')}</div>
+          </div>
+        `).join('')}
+      `;
+      lucide.createIcons();
+      el.querySelectorAll('.cc-select-plan').forEach(chk => chk.addEventListener('change', () => {
+        const id = chk.dataset.id;
+        if (chk.checked) ccSelection.plans.add(id); else ccSelection.plans.delete(id);
+        renderCCPlans(el);
+      }));
+      el.querySelectorAll('.plans-bulk').forEach(btn => btn.addEventListener('click', async () => {
+        if (!ccSelection.plans.size) return toast('No plans selected', 'warning');
+        const action = btn.dataset.action;
+        try {
+          const payload = action === 'assign'
+            ? { agent_id: prompt('Assign to agent ID:'), agent_name: prompt('Agent display name (optional):', '') || '' }
+            : {};
+          if (action === 'assign' && !payload.agent_id) return;
+          await batchMutateIntelObjects('plan', Array.from(ccSelection.plans), action, payload);
+          ccSelection.plans.clear();
+          toast(`Batch action complete: ${action}`, 'success');
+          renderCCPlans(el);
+        } catch (err) {
+          toast(err.message || 'Batch action failed', 'error');
+        }
+      }));
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load plans</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCExecutions(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const executions = (intel.executions || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-blue">Executions</span>
+          <span class="text-sm text-muted">Runtime layer with progress, logs, and outputs</span>
+        </div>
+        <div class="card" style="margin-bottom:10px;padding:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="text-xs text-muted">Batch Actions (${ccSelection.executions.size} selected)</span>
+          <button class="btn btn-secondary btn-xs exe-bulk" data-action="pause">Pause selected</button>
+          <button class="btn btn-secondary btn-xs exe-bulk" data-action="cancel">Cancel selected</button>
+          <button class="btn btn-primary btn-xs exe-bulk" data-action="retry_step">Retry selected failures</button>
+        </div>
+        <div class="card">
+          ${(executions || []).map(exe => `
+            <div class="cc-activity-item" style="padding:12px 0;border-bottom:1px solid var(--color-border)">
+              <input type="checkbox" class="cc-select-execution" data-id="${escapeHtml(exe.id)}" ${ccSelection.executions.has(exe.id) ? 'checked' : ''} />
+              <span class="badge badge-${exe.status}">${escapeHtml(exe.status)}</span>
+              <div class="cc-activity-detail">
+                <span class="cc-activity-agent">${escapeHtml(exe.id)}</span>
+                <span class="cc-activity-text">${escapeHtml((exe.affected_urls || []).join(', ') || 'No URL targets')}</span>
+                <span class="cc-activity-meta">${(exe.tokens || 0).toLocaleString()} tokens · $${(exe.cost || 0).toFixed(4)} · ${(exe.distribution_targets || []).join(', ') || 'site-only'} · block: ${escapeHtml(exe.blocking_reason || 'none')}</span>
+              </div>
+              <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('execution','${escapeHtml(exe.id)}')">Inspect</button>
+            </div>
+          `).join('')}
+        </div>`;
+      lucide.createIcons();
+      el.querySelectorAll('.cc-select-execution').forEach(chk => chk.addEventListener('change', () => {
+        const id = chk.dataset.id;
+        if (chk.checked) ccSelection.executions.add(id); else ccSelection.executions.delete(id);
+        renderCCExecutions(el);
+      }));
+      el.querySelectorAll('.exe-bulk').forEach(btn => btn.addEventListener('click', async () => {
+        if (!ccSelection.executions.size) return toast('No executions selected', 'warning');
+        try {
+          await batchMutateIntelObjects('execution', Array.from(ccSelection.executions), btn.dataset.action, {});
+          ccSelection.executions.clear();
+          toast(`Batch action complete: ${btn.dataset.action}`, 'success');
+          renderCCExecutions(el);
+        } catch (err) {
+          toast(err.message || 'Batch action failed', 'error');
+        }
+      }));
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load executions</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCOutcomes(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const outcomes = (intel.outcomes || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-green">Outcomes</span>
+          <span class="text-sm text-muted">Before/after performance evidence tied to executed actions</span>
+        </div>
+        <div class="cc-grid-2">
+          ${outcomes.map(o => `
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">${escapeHtml(o.type || 'Outcome')}</h3>
+                <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('outcome','${escapeHtml(o.id)}')">Inspect</button>
+              </div>
+              <div class="text-sm" style="margin-bottom:6px">Citations: <strong>${o.citations_detected || 0}</strong></div>
+              <div class="text-sm" style="margin-bottom:6px">Ranking change: <strong>${o.ranking_change || 0}</strong></div>
+              <div class="text-sm" style="margin-bottom:6px">Impressions: <strong>${o.impression_change || 0}</strong></div>
+              <div class="text-sm" style="margin-bottom:6px">Traffic: <strong>${o.traffic_change || 0}</strong></div>
+              <div class="text-xs text-muted">Measured ${timeAgo(o.measured_at)}</div>
+            </div>
+          `).join('')}
+        </div>`;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load outcomes</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+    }
+  }
+
+  async function renderCCCompetitorsOps(el) {
+    el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
+    try {
+      const intel = await loadSearchOpsIntel();
+      const comps = (intel.competitors || []).filter(matchesCCFilter);
+      el.innerHTML = `
+        <div class="cc-section-header">
+          <span class="cc-section-badge cc-badge-orange">Competitors</span>
+          <span class="text-sm text-muted">Tracked domains, recent deltas, and counter opportunities</span>
+        </div>
+        <div class="cc-grid-2">
+          ${comps.map(c => `
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">${escapeHtml(c.label || c.domain)}</h3>
+                <button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('competitor','${escapeHtml(c.id)}')">Inspect</button>
+              </div>
+              <div class="text-xs text-muted" style="margin-bottom:6px">${escapeHtml(c.domain || '')}</div>
+              ${(c.recent_changes || []).map(ch => `<div class="cc-activity-item"><span class="cc-service-dot" style="background:#f59e0b"></span><span class="cc-activity-text">${escapeHtml(ch)}</span></div>`).join('')}
+            </div>
+          `).join('')}
+        </div>`;
+      lucide.createIcons();
+    } catch (err) {
+      el.innerHTML = `<div class="empty-state"><h3 class="empty-state-title">Failed to load competitors</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
     }
   }
 
@@ -1643,7 +3162,10 @@
   async function renderCCAgentOps(el) {
     el.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
-      const data = await apiFetch(`/api/command-center/agents-activity${getCCScopeQuery()}`);
+      const [data, intel] = await Promise.all([
+        apiFetch(`/api/command-center/agents-activity${getCCScopeQuery()}`),
+        loadSearchOpsIntel(),
+      ]);
       const agents = Object.entries(data.agents || {});
       const timeline = data.timeline || [];
       const dailyChart = data.daily_chart || [];
@@ -1651,7 +3173,7 @@
       el.innerHTML = `
         <div class="cc-section-header">
           <span class="cc-section-badge cc-badge-blue">Agent Operations</span>
-          <span class="text-sm text-muted">${agents.length} agents · ${timeline.length} recent interactions</span>
+          <span class="text-sm text-muted">${agents.length} operators · ${timeline.length} recent interactions · ${intel.kpis?.executions_today || 0} executions today</span>
         </div>
 
         <div class="card">
@@ -1697,6 +3219,25 @@
             </div>
           </div>
         </div>
+        <div class="card" style="margin-top:16px">
+          <div class="card-header"><h3 class="card-title">Audit Trail (Lifecycle + Scope)</h3></div>
+          <table class="cc-table">
+            <thead><tr><th>Operator</th><th>Stage</th><th>Scope</th><th>Trigger</th><th>Actions</th><th>Status</th></tr></thead>
+            <tbody>
+              ${(intel.audit_trail || []).map(a => `
+                <tr>
+                  <td>${escapeHtml(a.agent_name || a.actor || a.agent_id || 'Unknown')}</td>
+                  <td>${escapeHtml(a.lifecycle_stage || a.action_type || 'Execute')}</td>
+                  <td>${escapeHtml(a.scope_mode || a.object_type || 'site')}</td>
+                  <td>${escapeHtml((a.triggering_signal_ids || []).join(', ') || a.object_id || 'n/a')}</td>
+                  <td>${escapeHtml((a.affected_resources || []).join(', ') || Object.values(a.linked_ids || {}).join(', ') || 'n/a')}</td>
+                  <td><span class="badge badge-${a.status || a.new_state || 'active'}">${escapeHtml(a.status || a.new_state || 'unknown')}</span></td>
+                </tr>
+              `).join('')}
+              ${(intel.audit_trail || []).length === 0 ? '<tr><td colspan="6" class="text-muted">No audit entries yet</td></tr>' : ''}
+            </tbody>
+          </table>
+        </div>
       `;
       lucide.createIcons();
 
@@ -1738,26 +3279,54 @@
 
       if (agents.length === 0) {
         container.innerHTML = `
-          <div class="page-header"><h1 class="page-title">My Agents</h1></div>
+          <div class="page-header"><h1 class="page-title">Search Operators</h1></div>
           <div class="empty-state">
             <div class="empty-state-icon"><i data-lucide="bot"></i></div>
-            <h3 class="empty-state-title">No agents yet</h3>
-            <p class="empty-state-desc">Create your first AI agent to automate tasks and get insights.</p>
-            <a href="#/wizard" class="btn btn-primary btn-lg">Create Agent</a>
+            <h3 class="empty-state-title">No operators yet</h3>
+            <p class="empty-state-desc">Create your first search operator to watch signals, plan actions, execute updates, and measure impact.</p>
+            <a href="#/wizard" class="btn btn-primary btn-lg">Create Search Operator</a>
           </div>`;
         lucide.createIcons();
         return;
       }
 
-      const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
+      const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="radar" style="width:20px;height:20px"></i>', support: '<i data-lucide="refresh-ccw" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="swords" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>', ai_retrieval: '<i data-lucide="brain-circuit" style="width:20px;height:20px"></i>', schema_optimizer: '<i data-lucide="braces" style="width:20px;height:20px"></i>', distribution_operator: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', recovery_operator: '<i data-lucide="refresh-ccw" style="width:20px;height:20px"></i>', full_search_operator: '<i data-lucide="radar" style="width:20px;height:20px"></i>', custom_search_operator: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
+      const purposeByTemplate = {
+        seo: 'Watches search demand and detects ranking opportunities.',
+        ai_retrieval: 'Detects citation gaps and retrieval weaknesses.',
+        analytics: 'Monitors competitor shifts and citation wins.',
+        content: 'Generates and publishes support content assets.',
+        support: 'Recovers declining pages with targeted refreshes.',
+        social: 'Distributes published content across social channels.',
+        sales: 'Runs full Observe -> Diagnose -> Plan -> Execute -> Measure loop.',
+        schema_optimizer: 'Finds structured-data and retrieval markup weaknesses.',
+        distribution_operator: 'Distributes supporting assets after publication.',
+        recovery_operator: 'Recovers declining pages with refresh playbooks.',
+        full_search_operator: 'Runs end-to-end autonomous search operations.',
+        custom_search_operator: 'Custom operator configured to your strategy and guardrails.',
+        custom: 'Custom operator configured to your strategy and guardrails.',
+      };
+      const automationLabel = {
+        advisory_only: 'Advisory only',
+        approval_all: 'Approval for all actions',
+        approval_publish_distribution: 'Approval for publish/distribution',
+        semi_auto_rules: 'Semi-auto within rules',
+        full_auto_rules: 'Full auto within rules',
+      };
+      const lifecycleByStatus = {
+        active: 'Watching',
+        running: 'Executing',
+        paused: 'Idle',
+        error: 'Error',
+      };
 
       container.innerHTML = `
         <div class="page-header flex justify-between items-center">
           <div>
-            <h1 class="page-title">My Agents</h1>
-            <p class="page-subtitle">${agents.length} agent${agents.length !== 1 ? 's' : ''}</p>
+            <h1 class="page-title">Search Operators</h1>
+            <p class="page-subtitle">${agents.length} operators with live watch scopes, plans, and execution impact</p>
           </div>
-          <a href="#/wizard" class="btn btn-primary"><i data-lucide="plus" style="width:16px;height:16px"></i> Create Agent</a>
+          <a href="#/wizard" class="btn btn-primary"><i data-lucide="plus" style="width:16px;height:16px"></i> Create Operator</a>
         </div>
         <div class="grid-2" id="agents-grid">
           ${agents.map(agent => `
@@ -1767,14 +3336,16 @@
                   <div class="agent-card-icon">${templateIcons[agent.template_id] || '<i data-lucide="settings" style="width:20px;height:20px"></i>'}</div>
                   <div>
                     <div class="agent-card-name">${escapeHtml(agent.name)}</div>
-                    <span class="badge badge-${agent.status}">${agent.status}</span>
+                    <span class="badge badge-${agent.status}">${escapeHtml(lifecycleByStatus[agent.status] || agent.status)}</span>
                   </div>
                 </div>
               </div>
+              <div class="text-xs text-muted" style="margin-bottom:8px"><strong>Agent Purpose:</strong> ${escapeHtml(purposeByTemplate[agent.template_id] || purposeByTemplate.custom)}</div>
               <div class="agent-card-desc">${escapeHtml(agent.description || 'No description')}</div>
               <div class="agent-card-meta">
                 <span><i data-lucide="cpu" style="width:12px;height:12px;display:inline"></i> ${agent.model || 'gpt-4o-mini'}</span>
-                <span>Last run: ${timeAgo(agent.last_run_at)}</span>
+                <span>Automation: ${escapeHtml(automationLabel[agent.automation_mode] || 'Approval for publish/distribution')}</span>
+                <span>Last impact: ${timeAgo(agent.last_run_at)}</span>
               </div>
               <div class="agent-card-actions">
                 <button class="btn btn-primary btn-sm agent-run-btn" data-id="${agent.id}" data-name="${escapeHtml(agent.name)}">
@@ -1864,7 +3435,7 @@
   // ── AGENT DETAIL VIEW (Tabbed Workspace) ──────────────────────
   async function renderAgentDetail(container, agentId) {
     const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
-    let activeTab = 'chat';
+    let activeTab = 'overview';
     let agent = null;
 
     // ── Render the full workspace skeleton ──
@@ -1893,8 +3464,14 @@
         </div>
 
         <div class="agent-tabs" id="agent-tab-bar">
+          <button class="agent-tab ${activeTab === 'overview' ? 'active' : ''}" data-tab="overview">Overview</button>
           <button class="agent-tab ${activeTab === 'chat' ? 'active' : ''}" data-tab="chat">Chat</button>
-          <button class="agent-tab ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">Activity</button>
+          <button class="agent-tab ${activeTab === 'queue' ? 'active' : ''}" data-tab="queue">Queue</button>
+          <button class="agent-tab ${activeTab === 'runs' ? 'active' : ''}" data-tab="runs">Runs</button>
+          <button class="agent-tab ${activeTab === 'approvals' ? 'active' : ''}" data-tab="approvals">Approvals</button>
+          <button class="agent-tab ${activeTab === 'outcomes' ? 'active' : ''}" data-tab="outcomes">Outcomes</button>
+          <button class="agent-tab ${activeTab === 'assignments' ? 'active' : ''}" data-tab="assignments">Assignments</button>
+          <button class="agent-tab ${activeTab === 'audit' ? 'active' : ''}" data-tab="audit">Audit</button>
           <button class="agent-tab ${activeTab === 'settings' ? 'active' : ''}" data-tab="settings">Settings</button>
         </div>
 
@@ -1931,9 +3508,167 @@
     function renderTabContent() {
       const tabContent = document.getElementById('agent-tab-content');
       if (!tabContent) return;
-      if (activeTab === 'chat') renderChatTab(tabContent);
-      else if (activeTab === 'activity') renderActivityTab(tabContent);
+      if (activeTab === 'overview') renderOperatorOverviewTab(tabContent);
+      else if (activeTab === 'chat') renderChatTab(tabContent);
+      else if (activeTab === 'queue') renderQueueTab(tabContent);
+      else if (activeTab === 'runs') renderRunsTab(tabContent);
+      else if (activeTab === 'approvals') renderApprovalsTab(tabContent);
+      else if (activeTab === 'outcomes') renderOutcomesTab(tabContent);
+      else if (activeTab === 'assignments') renderAssignmentsTab(tabContent);
+      else if (activeTab === 'audit') renderAuditTab(tabContent);
       else if (activeTab === 'settings') renderSettingsTab(tabContent);
+    }
+
+    async function renderOperatorOverviewTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const agentRuntime = (intel.agents || []).find(a => a.id === agentId) || {};
+        const work = agentRuntime.workload_summary || {};
+        const thr = agentRuntime.throughput_summary || {};
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="kpi-grid" style="margin-bottom:16px">
+              <div class="kpi-card"><div class="kpi-label">Workload</div><div class="kpi-value" style="font-size:18px">${escapeHtml(work.workload_indicator || 'underutilized')}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Running</div><div class="kpi-value">${work.running_executions || 0}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Blocked</div><div class="kpi-value">${work.blocked_executions || 0}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Failed</div><div class="kpi-value">${work.failed_executions || 0}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Throughput 24h</div><div class="kpi-value">${thr.throughput_24h || 0}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Success Rate</div><div class="kpi-value">${Number(thr.success_rate || 0).toFixed(1)}%</div></div>
+              <div class="kpi-card"><div class="kpi-label">Token Usage</div><div class="kpi-value">${(thr.token_usage || 0).toLocaleString()}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Cost Usage</div><div class="kpi-value">$${Number(thr.cost_usage || 0).toFixed(4)}</div></div>
+            </div>
+            <div class="text-xs text-muted">Queue cap: ${agentRuntime.queue_limits?.max_queued_work ?? 12} · Concurrency cap: ${agentRuntime.concurrency_limits?.max_concurrent_executions ?? 3} · Approval dependency: ${Number(thr.approval_dependency_rate || 0).toFixed(1)}%</div>
+          </div>`;
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load overview</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+
+    async function renderQueueTab(tabContent) { return renderAssignmentsTab(tabContent); }
+    async function renderRunsTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const runs = (intel.executions || []).filter(e => e.agent_id === agentId);
+        const thr = ((intel.agents || []).find(a => a.id === agentId) || {}).throughput_summary || {};
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="kpi-grid" style="margin-bottom:16px">
+              <div class="kpi-card"><div class="kpi-label">Running</div><div class="kpi-value">${runs.filter(r => r.status === 'running').length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Blocked</div><div class="kpi-value">${runs.filter(r => !!r.blocking_reason).length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Failed</div><div class="kpi-value">${runs.filter(r => r.status === 'failed').length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Completed</div><div class="kpi-value">${runs.filter(r => r.status === 'completed').length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Avg to Execution</div><div class="kpi-value">${Math.round(thr.avg_time_to_execution_seconds || 0)}s</div></div>
+              <div class="kpi-card"><div class="kpi-label">Avg to Completion</div><div class="kpi-value">${Math.round(thr.avg_time_to_completion_seconds || 0)}s</div></div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Execution Runs</h3></div>
+              <table class="cc-table">
+                <thead><tr><th>Execution</th><th>Status</th><th>Current Step</th><th>Retries</th><th>Actions</th></tr></thead>
+                <tbody>
+                  ${runs.map(r => {
+                    const current = (r.steps || []).find(s => ['running','queued','awaiting_approval','waiting_dependency','failed'].includes(s.status));
+                    const retries = (r.steps || []).reduce((sum, s) => sum + Math.max(0, (s.attempts || 0) - 1), 0);
+                    return `<tr>
+                      <td>${escapeHtml(r.id || '')}</td>
+                      <td>${escapeHtml(r.status || '')}${r.blocking_reason ? ` · ${escapeHtml(r.blocking_reason)}` : ''}</td>
+                      <td>${escapeHtml(current?.label || 'n/a')}</td>
+                      <td>${retries}</td>
+                      <td style="display:flex;gap:6px">
+                        <button class="btn btn-ghost btn-xs" onclick="window.NC.inspectIntelObject('execution','${escapeHtml(r.id)}')">Inspect</button>
+                        <button class="btn btn-secondary btn-xs runs-action" data-id="${escapeHtml(r.id)}" data-action="retry_step">Retry</button>
+                        <button class="btn btn-secondary btn-xs runs-action" data-id="${escapeHtml(r.id)}" data-action="approve_blocked">Continue</button>
+                      </td>
+                    </tr>`;
+                  }).join('')}
+                  ${runs.length === 0 ? '<tr><td colspan="5" class="text-muted">No runs for this operator yet.</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+        tabContent.querySelectorAll('.runs-action').forEach(btn => btn.addEventListener('click', async () => {
+          try {
+            await mutateIntelObject('execution', btn.dataset.id, btn.dataset.action, {});
+            toast(`Run action: ${btn.dataset.action}`, 'success');
+            renderRunsTab(tabContent);
+          } catch (err) {
+            toast(err.message || 'Run action failed', 'error');
+          }
+        }));
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load runs</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+    async function renderOutcomesTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const agentExecutionIds = new Set((intel.executions || []).filter(e => e.agent_id === agentId).map(e => e.id));
+        const outcomes = (intel.outcomes || []).filter(o => agentExecutionIds.has(o.execution_id));
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Outcomes Influenced</h3></div>
+              <table class="cc-table">
+                <thead><tr><th>Outcome</th><th>Execution</th><th>Status</th><th>Confidence</th><th>Impact</th></tr></thead>
+                <tbody>
+                  ${outcomes.map(o => `<tr><td>${escapeHtml(o.type || o.id)}</td><td>${escapeHtml(o.execution_id || '')}</td><td>${escapeHtml(o.status || 'observed')}</td><td>${Math.round((o.confidence || 0) * 100)}%</td><td>${escapeHtml(o.narrative_summary || '')}</td></tr>`).join('')}
+                  ${outcomes.length === 0 ? '<tr><td colspan="5" class="text-muted">No outcomes linked yet.</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load outcomes</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+
+    async function renderApprovalsTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const approvals = (intel.approval_items || []).filter(a => a.agent_id === agentId);
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Approvals</h3></div>
+              <table class="cc-table">
+                <thead><tr><th>Status</th><th>Type</th><th>Target</th><th>Approval Type</th><th>Risk</th><th>Decision</th></tr></thead>
+                <tbody>
+                  ${approvals.map(a => `<tr>
+                    <td>${escapeHtml(a.status || 'pending')}</td>
+                    <td>${escapeHtml(a.object_type || '')}</td>
+                    <td>${escapeHtml(a.target_resource || a.title || a.object_id || '')}</td>
+                    <td>${escapeHtml(a.approval_type || a.approval_requirement_type || '')}</td>
+                    <td>${escapeHtml(a.risk_context || 'n/a')}</td>
+                    <td style="display:flex;gap:6px">
+                      ${a.status === 'pending' ? `
+                        <button class="btn btn-secondary btn-xs agent-approval" data-id="${escapeHtml(a.approval_id || '')}" data-action="approve">Approve</button>
+                        <button class="btn btn-secondary btn-xs agent-approval" data-id="${escapeHtml(a.approval_id || '')}" data-action="approve_with_edits">Approve with edits</button>
+                        <button class="btn btn-secondary btn-xs agent-approval" data-id="${escapeHtml(a.approval_id || '')}" data-action="reject">Reject</button>
+                      ` : `${escapeHtml(a.decided_by || 'system')} · ${escapeHtml(timeAgo(a.decided_at || a.requested_at || new Date().toISOString()))}`}
+                    </td>
+                  </tr>`).join('')}
+                  ${approvals.length === 0 ? '<tr><td colspan="6" class="text-muted">No approvals for this operator.</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+        tabContent.querySelectorAll('.agent-approval').forEach(btn => btn.addEventListener('click', async () => {
+          if (!btn.dataset.id) return;
+          try {
+            const reason = btn.dataset.action === 'reject' ? (prompt('Rejection reason:', '') || '') : (btn.dataset.action === 'approve_with_edits' ? (prompt('Edit notes:', '') || '') : '');
+            await mutateIntelObject('approval', btn.dataset.id, btn.dataset.action, { reason });
+            toast(`Approval ${btn.dataset.action}`, 'success');
+            renderApprovalsTab(tabContent);
+          } catch (err) {
+            toast(err.message || 'Approval update failed', 'error');
+          }
+        }));
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load approvals</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
     }
 
     // ── TAB 1: CHAT ──
@@ -2226,11 +3961,113 @@
       }
     }
 
+    async function renderAssignmentsTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const aid = agentId;
+        const assignedSignals = (intel.signals || []).filter(s => s.assigned_agent_id === aid);
+        const assignedOpps = (intel.opportunities || []).filter(o => o.assigned_agent_id === aid);
+        const assignedGaps = (intel.citation_gaps || []).filter(g => g.assigned_agent_id === aid);
+        const assignedPlans = (intel.plans || []).filter(p => p.agent_id === aid);
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="kpi-grid" style="margin-bottom:16px">
+              <div class="kpi-card"><div class="kpi-label">Signals</div><div class="kpi-value">${assignedSignals.length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Opportunities</div><div class="kpi-value">${assignedOpps.length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Citation Gaps</div><div class="kpi-value">${assignedGaps.length}</div></div>
+              <div class="kpi-card"><div class="kpi-label">Plans</div><div class="kpi-value">${assignedPlans.length}</div></div>
+            </div>
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Assigned Work Queue</h3></div>
+              <table class="cc-table">
+                <thead><tr><th>Type</th><th>Title</th><th>Status</th><th>Actions</th></tr></thead>
+                <tbody>
+                  ${assignedSignals.map(s => `<tr><td>Signal</td><td>${escapeHtml(s.title || s.id)}</td><td>${escapeHtml(s.status || 'new')}</td><td style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('signal','${escapeHtml(s.id)}')">Inspect</button><button class="btn btn-secondary btn-xs reassign-item" data-kind="signal" data-id="${escapeHtml(s.id)}">Reassign</button></td></tr>`).join('')}
+                  ${assignedOpps.map(o => `<tr><td>Opportunity</td><td>${escapeHtml(o.title || o.id)}</td><td>${escapeHtml(o.status || 'open')}</td><td style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('opportunity','${escapeHtml(o.id)}')">Inspect</button><button class="btn btn-secondary btn-xs reassign-item" data-kind="opportunity" data-id="${escapeHtml(o.id)}">Reassign</button></td></tr>`).join('')}
+                  ${assignedGaps.map(g => `<tr><td>Gap</td><td>${escapeHtml(g.target_topic || g.gap_id || g.id)}</td><td>${escapeHtml(g.status || 'open')}</td><td style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('citation_gap','${escapeHtml(g.gap_id || g.id)}')">Inspect</button><button class="btn btn-secondary btn-xs reassign-item" data-kind="citation_gap" data-id="${escapeHtml(g.gap_id || g.id)}">Reassign</button></td></tr>`).join('')}
+                  ${assignedPlans.map(p => `<tr><td>Plan</td><td>${escapeHtml(p.name || p.id)}</td><td>${escapeHtml(p.status || 'draft')}</td><td style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="window.NC.inspectIntelObject('plan','${escapeHtml(p.id)}')">Inspect</button><button class="btn btn-secondary btn-xs reassign-item" data-kind="plan" data-id="${escapeHtml(p.id)}">Reassign</button></td></tr>`).join('')}
+                  ${(assignedSignals.length + assignedOpps.length + assignedGaps.length + assignedPlans.length) === 0 ? '<tr><td colspan="4" class="text-muted">No assigned objects yet.</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+        lucide.createIcons({ nodes: [tabContent] });
+        tabContent.querySelectorAll('.reassign-item').forEach(btn => btn.addEventListener('click', async () => {
+          const kind = btn.dataset.kind;
+          const id = btn.dataset.id;
+          const newAgentId = prompt('Reassign to agent ID:');
+          if (!newAgentId) return;
+          try {
+            await mutateIntelObject(kind, id, 'assign', { agent_id: newAgentId, agent_name: prompt('Agent name (optional):', '') || '' });
+            toast(`Reassigned ${kind}`, 'success');
+            renderAssignmentsTab(tabContent);
+          } catch (err) {
+            toast(err.message || 'Reassign failed', 'error');
+          }
+        }));
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load assignments</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+
+    async function renderAuditTab(tabContent) {
+      tabContent.innerHTML = `<div class="loading-center" style="padding:40px"><div class="loading-spinner"></div></div>`;
+      try {
+        const intel = await loadSearchOpsIntel();
+        const history = (intel.audit_trail || []).filter(a =>
+          (a.agent_id && a.agent_id === agentId) ||
+          (a.linked_ids && Object.values(a.linked_ids || {}).includes(agentId)) ||
+          (a.object_type === 'agent' && a.object_id === agentId)
+        );
+        tabContent.innerHTML = `
+          <div style="padding:16px">
+            <div class="card">
+              <div class="card-header"><h3 class="card-title">Operator Audit History</h3></div>
+              <table class="cc-table">
+                <thead><tr><th>When</th><th>Action</th><th>Object</th><th>State</th><th>Notes</th></tr></thead>
+                <tbody>
+                  ${history.map(a => `
+                    <tr>
+                      <td>${escapeHtml(timeAgo(a.timestamp || a.started_at || new Date().toISOString()))}</td>
+                      <td>${escapeHtml(a.action_type || a.lifecycle_stage || 'event')}</td>
+                      <td>${escapeHtml(`${a.object_type || 'object'}:${a.object_id || ''}`)}</td>
+                      <td>${escapeHtml(`${a.old_state || '-'} -> ${a.new_state || a.status || '-'}`)}</td>
+                      <td>${escapeHtml(a.notes || (a.automation_snapshot?.automation_mode || ''))}</td>
+                    </tr>
+                  `).join('')}
+                  ${history.length === 0 ? '<tr><td colspan="5" class="text-muted">No audit events yet.</td></tr>' : ''}
+                </tbody>
+              </table>
+            </div>
+          </div>`;
+      } catch (err) {
+        tabContent.innerHTML = `<div class="empty-state" style="padding:40px"><h3 class="empty-state-title">Failed to load audit</h3><p class="empty-state-desc">${escapeHtml(err.message)}</p></div>`;
+      }
+    }
+
     // ── TAB 3: SETTINGS ──
     function renderSettingsTab(tabContent) {
       const agentScope = getAgentDataScope(agent);
+      const opSettings = getAgentOperatorSettings(agent);
       tabContent.innerHTML = `
         <div style="padding:20px">
+          <div class="kpi-grid" style="margin-bottom:12px">
+            <div class="kpi-card">
+              <div class="kpi-label">Lifecycle State</div>
+              <div class="kpi-value" style="font-size:18px">${escapeHtml(opSettings.lifecycle_state || 'Watching')}</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Failure Rate</div>
+              <div class="kpi-value" style="font-size:18px">${Number(agent.audit_summary?.failure_rate || 0).toFixed(2)}%</div>
+              <div class="kpi-meta">${agent.audit_summary?.failed_runs || 0} failed runs</div>
+            </div>
+            <div class="kpi-card">
+              <div class="kpi-label">Cost (Recent)</div>
+              <div class="kpi-value" style="font-size:18px">$${Number(agent.cost_summary?.total_cost_last_runs || 0).toFixed(4)}</div>
+              <div class="kpi-meta">${(agent.cost_summary?.total_tokens_last_runs || 0).toLocaleString()} tokens</div>
+            </div>
+          </div>
           <!-- Config Form -->
           <div class="card mb-6">
             <div class="card-header">
@@ -2295,6 +4132,67 @@
                 <input type="text" class="form-input scope-field" data-scope-field="gsc_site" id="agent-scope-gsc-manual" placeholder="https://example.com/ or sc-domain:example.com" value="${escapeHtml(agentScope.gsc_site || '')}">
                 <input type="text" class="form-input scope-field" data-scope-field="bing_site" id="agent-scope-bing-manual" placeholder="https://example.com/" value="${escapeHtml(agentScope.bing_site || '')}">
               </div>
+            </div>
+            <div class="form-group" style="margin-top:16px">
+              <label class="form-label">Automation Mode</label>
+              <select class="form-select config-field" data-field="automation_mode" id="agent-automation-mode">
+                <option value="advisory_only" ${opSettings.automation_mode === 'advisory_only' ? 'selected' : ''}>Advisory only</option>
+                <option value="approval_all" ${opSettings.automation_mode === 'approval_all' ? 'selected' : ''}>Approval required for all actions</option>
+                <option value="approval_publish_distribution" ${opSettings.automation_mode === 'approval_publish_distribution' ? 'selected' : ''}>Approval for publish/distribution only</option>
+                <option value="semi_auto_rules" ${opSettings.automation_mode === 'semi_auto_rules' ? 'selected' : ''}>Semi-auto within rules</option>
+                <option value="full_auto_rules" ${opSettings.automation_mode === 'full_auto_rules' ? 'selected' : ''}>Full auto within rules</option>
+              </select>
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label class="form-label">Current Lifecycle State</label>
+              <select class="form-select guardrail-field" id="agent-lifecycle-state">
+                ${['Watching','Diagnosing','Planning','Executing','Measuring','Idle','Needs approval','Error'].map(s => `<option value="${escapeHtml(s)}" ${opSettings.lifecycle_state === s ? 'selected' : ''}>${escapeHtml(s)}</option>`).join('')}
+              </select>
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label class="form-label">Approval Rules</label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="guard-req-all" ${opSettings.approval_rules?.require_for_all_actions ? 'checked' : ''}> Require approval for all actions</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="guard-req-publish" ${opSettings.approval_rules?.require_for_publish ? 'checked' : ''}> Require approval for publish</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="guard-req-social" ${opSettings.approval_rules?.require_for_distribution ? 'checked' : ''}> Require approval for social distribution</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="guard-block-money" ${opSettings.approval_rules?.block_money_pages_without_approval ? 'checked' : ''}> Block money pages without approval</label>
+              </div>
+              <div style="margin-top:8px">
+                <label class="form-label">Max executions per day</label>
+                <input class="form-input guardrail-field" id="guard-max-exec" type="number" min="1" value="${Number(opSettings.approval_rules?.max_executions_per_day || 8)}">
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label class="form-label">Execution Permissions</label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-draft" ${opSettings.execution_permissions?.draft_content ? 'checked' : ''}> Draft content</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-patch" ${opSettings.execution_permissions?.patch_existing_pages ? 'checked' : ''}> Patch existing pages</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-new-page" ${opSettings.execution_permissions?.create_new_pages ? 'checked' : ''}> Create new pages</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-schema" ${opSettings.execution_permissions?.apply_schema_only ? 'checked' : ''}> Apply schema</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-publish" ${opSettings.execution_permissions?.publish_content ? 'checked' : ''}> Publish content</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-social" ${opSettings.execution_permissions?.distribute_social ? 'checked' : ''}> Distribute social</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-index" ${opSettings.execution_permissions?.submit_indexing ? 'checked' : ''}> Submit indexing</label>
+                <label class="checkbox-item"><input class="guardrail-field" type="checkbox" id="perm-markdown" ${opSettings.execution_permissions?.update_markdown_layers ? 'checked' : ''}> Update markdown/croutons</label>
+              </div>
+            </div>
+            <div class="form-group" style="margin-top:8px">
+              <label class="form-label">Allowed Targets</label>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+                <input class="form-input guardrail-field" id="allowed-sections" placeholder="Allowed site sections (comma separated)" value="${escapeHtml((opSettings.allowed_targets?.site_sections || []).join(', '))}">
+                <input class="form-input guardrail-field" id="allowed-channels" placeholder="Allowed distribution channels (comma separated)" value="${escapeHtml((opSettings.allowed_targets?.distribution_channels || []).join(', '))}">
+              </div>
+            </div>
+          </div>
+
+          <div class="card mb-6" style="margin-top:12px">
+            <div class="card-header"><h3 class="card-title">Operator Actions</h3></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="manual_scan">Run Manual Scan</button>
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="update_guardrails">Tighten Guardrails</button>
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="change_automation_mode">Set Automation Mode</button>
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="reassign_scope">Reassign Scope</button>
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="pause">Pause Operator</button>
+              <button class="btn btn-secondary btn-sm operator-action-btn" data-action="resume">Resume Operator</button>
             </div>
           </div>
 
@@ -2366,6 +4264,11 @@
           if (saveBtn) saveBtn.style.display = 'inline-flex';
         });
       });
+      tabContent.querySelectorAll('.guardrail-field').forEach(field => {
+        field.addEventListener('change', () => {
+          if (saveBtn) saveBtn.style.display = 'inline-flex';
+        });
+      });
 
       saveBtn?.addEventListener('click', async () => {
         const updateData = {};
@@ -2381,6 +4284,30 @@
           bing_site: (document.getElementById('agent-scope-bing')?.value || '').trim() || (document.getElementById('agent-scope-bing-manual')?.value || '').trim(),
         };
         updateData.data_scope = data_scope;
+        updateData.automation_mode = document.getElementById('agent-automation-mode')?.value || opSettings.automation_mode;
+        updateData.approval_rules = {
+          require_for_all_actions: !!document.getElementById('guard-req-all')?.checked,
+          require_for_publish: !!document.getElementById('guard-req-publish')?.checked,
+          require_for_distribution: !!document.getElementById('guard-req-social')?.checked,
+          block_money_pages_without_approval: !!document.getElementById('guard-block-money')?.checked,
+          max_executions_per_day: Number(document.getElementById('guard-max-exec')?.value || 8),
+        };
+        updateData.execution_permissions = {
+          draft_content: !!document.getElementById('perm-draft')?.checked,
+          patch_existing_pages: !!document.getElementById('perm-patch')?.checked,
+          create_new_pages: !!document.getElementById('perm-new-page')?.checked,
+          apply_schema_only: !!document.getElementById('perm-schema')?.checked,
+          publish_content: !!document.getElementById('perm-publish')?.checked,
+          distribute_social: !!document.getElementById('perm-social')?.checked,
+          submit_indexing: !!document.getElementById('perm-index')?.checked,
+          update_markdown_layers: !!document.getElementById('perm-markdown')?.checked,
+        };
+        updateData.allowed_targets = {
+          site_sections: (document.getElementById('allowed-sections')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+          distribution_channels: (document.getElementById('allowed-channels')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+          competitor_domains: opSettings.allowed_targets?.competitor_domains || [],
+        };
+        updateData.lifecycle_state = document.getElementById('agent-lifecycle-state')?.value || opSettings.lifecycle_state || 'Watching';
         const origHtml = saveBtn.innerHTML;
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div> Saving...';
@@ -2406,6 +4333,47 @@
           lucide.createIcons({ nodes: [saveBtn] });
         }
       });
+
+      tabContent.querySelectorAll('.operator-action-btn').forEach(btn => btn.addEventListener('click', async () => {
+        const action = btn.dataset.action;
+        const payload = { agent_name: agent.name };
+        if (action === 'change_automation_mode') {
+          const mode = prompt('Automation mode:', document.getElementById('agent-automation-mode')?.value || opSettings.automation_mode || 'approval_publish_distribution');
+          if (!mode) return;
+          payload.automation_mode = mode;
+        }
+        if (action === 'reassign_scope') {
+          const scopeMode = prompt('Scope mode (site/agent):', 'site');
+          if (!scopeMode) return;
+          payload.scope_mode = scopeMode;
+        }
+        if (action === 'update_guardrails') {
+          payload.approval_rules = {
+            require_for_all_actions: !!document.getElementById('guard-req-all')?.checked,
+            require_for_publish: !!document.getElementById('guard-req-publish')?.checked,
+            require_for_distribution: !!document.getElementById('guard-req-social')?.checked,
+            block_money_pages_without_approval: !!document.getElementById('guard-block-money')?.checked,
+            max_executions_per_day: Number(document.getElementById('guard-max-exec')?.value || 8),
+          };
+          payload.execution_permissions = {
+            draft_content: !!document.getElementById('perm-draft')?.checked,
+            patch_existing_pages: !!document.getElementById('perm-patch')?.checked,
+            create_new_pages: !!document.getElementById('perm-new-page')?.checked,
+            apply_schema_only: !!document.getElementById('perm-schema')?.checked,
+            publish_content: !!document.getElementById('perm-publish')?.checked,
+            distribute_social: !!document.getElementById('perm-social')?.checked,
+            submit_indexing: !!document.getElementById('perm-index')?.checked,
+            update_markdown_layers: !!document.getElementById('perm-markdown')?.checked,
+          };
+        }
+        try {
+          await mutateIntelObject('agent', agentId, action, payload);
+          toast(`Operator action complete: ${action.replace(/_/g, ' ')}`, 'success');
+          renderAgentDetail(container, agentId);
+        } catch (err) {
+          toast(err.message || 'Operator action failed', 'error');
+        }
+      }));
 
       // Danger zone
       document.getElementById('detail-toggle-btn')?.addEventListener('click', async () => {
@@ -2449,11 +4417,11 @@
       }
     }
 
-    const steps = ['Template', 'Name', 'Goals', 'Connect', 'AI Config', 'Schedule', 'Rules', 'Review'];
+    const steps = ['Template', 'Role', 'Intelligence Inputs', 'Data Sources', 'Models/Tools', 'Automation', 'Guardrails', 'Review'];
 
     container.innerHTML = `
       <div class="page-header">
-        <h1 class="page-title">Create Agent</h1>
+        <h1 class="page-title">Create Search Operator</h1>
       </div>
       <div class="wizard-progress">
         ${steps.map((s, i) => `
@@ -2467,7 +4435,7 @@
           <i data-lucide="arrow-left" style="width:14px;height:14px"></i> Back
         </button>
         <button class="btn btn-primary" id="wizard-next">
-          ${wizardStep === steps.length - 1 ? 'Deploy Agent' : 'Continue'} <i data-lucide="arrow-right" style="width:14px;height:14px"></i>
+          ${wizardStep === steps.length - 1 ? 'Deploy Operator' : 'Continue'} <i data-lucide="arrow-right" style="width:14px;height:14px"></i>
         </button>
       </div>
     `;
@@ -2497,7 +4465,7 @@
 
   function renderWizardTemplate(el) {
     el.innerHTML = `
-      <h2 class="wizard-step-title">Choose a Template</h2>
+      <h2 class="wizard-step-title">Choose Operator Template</h2>
       <div class="grid-3">
         ${wizardTemplates.map(t => `
           <div class="template-card ${wizardData.template_id === t.id ? 'selected' : ''}" data-id="${t.id}">
@@ -2529,15 +4497,15 @@
 
   function renderWizardName(el) {
     el.innerHTML = `
-      <h2 class="wizard-step-title">Name & Describe Your Agent</h2>
+      <h2 class="wizard-step-title">Define Operator Role & Objective</h2>
       <div class="card" style="max-width:600px">
         <div class="form-group">
-          <label class="form-label">Agent Name</label>
-          <input type="text" class="form-input" id="wizard-name" placeholder="e.g., SEO Optimizer, Lead Qualifier" value="${escapeHtml(wizardData.name)}">
+          <label class="form-label">Operator Name</label>
+          <input type="text" class="form-input" id="wizard-name" placeholder="e.g., Citation Hunter - Domains" value="${escapeHtml(wizardData.name)}">
         </div>
         <div class="form-group">
-          <label class="form-label">Description</label>
-          <textarea class="form-textarea" id="wizard-desc" placeholder="Describe what this agent should do...">${escapeHtml(wizardData.description)}</textarea>
+          <label class="form-label">Objective</label>
+          <textarea class="form-textarea" id="wizard-desc" placeholder="Describe what this operator watches, what actions it can take, and what success looks like...">${escapeHtml(wizardData.description)}</textarea>
         </div>
       </div>`;
   }
@@ -2545,9 +4513,9 @@
   function renderWizardGoals(el) {
     const defaultGoals = wizardData.templateObj?.default_goals || [];
     el.innerHTML = `
-      <h2 class="wizard-step-title">Set Goals</h2>
+      <h2 class="wizard-step-title">Choose Intelligence Inputs</h2>
       <div class="card" style="max-width:600px">
-        <p class="text-sm text-muted mb-4">Select the goals for your agent:</p>
+        <p class="text-sm text-muted mb-4">Select priority keyword clusters, entities, and topic goals your operator should reason over:</p>
         <div class="checkbox-group" id="goals-checkboxes">
           ${defaultGoals.map((g, i) => `
             <label class="checkbox-item">
@@ -2558,7 +4526,7 @@
         </div>
         <div style="margin-top:16px">
           <div class="form-group">
-            <label class="form-label">Add Custom Goal</label>
+            <label class="form-label">Add Custom Input Goal</label>
             <div style="display:flex;gap:8px">
               <input type="text" class="form-input" id="custom-goal-input" placeholder="Enter a custom goal">
               <button class="btn btn-secondary btn-sm" id="add-custom-goal">Add</button>
@@ -2590,8 +4558,8 @@
     ];
 
     el.innerHTML = `
-      <h2 class="wizard-step-title">Connect Services</h2>
-      <p class="text-sm text-muted mb-4">Optional: connect services your agent can use. OAuth services open your existing OAuth flow.</p>
+      <h2 class="wizard-step-title">Connect Data Sources</h2>
+      <p class="text-sm text-muted mb-4">Connect observe/execute surfaces this operator should use. OAuth services open your existing OAuth flow.</p>
       <div class="grid-2" id="wizard-connect-grid" style="margin-bottom:16px"></div>
       <div class="card" style="max-width:760px;margin-bottom:16px">
         <div class="form-group">
@@ -2784,7 +4752,7 @@
 
   function renderWizardAI(el) {
     el.innerHTML = `
-      <h2 class="wizard-step-title">Configure AI</h2>
+      <h2 class="wizard-step-title">Choose Models & Tools</h2>
       <div class="card" style="max-width:600px">
         <div class="form-group">
           <label class="form-label">Model</label>
@@ -2821,21 +4789,28 @@
   }
 
   function renderWizardSchedule(el) {
-    const schedules = [
-      { value: 'realtime', label: 'Real-time', desc: 'Responds instantly to triggers' },
-      { value: 'hourly', label: 'Hourly', desc: 'Runs every hour' },
-      { value: 'daily', label: 'Daily', desc: 'Runs once per day' },
-      { value: 'weekly', label: 'Weekly', desc: 'Runs once per week' },
-      { value: 'custom', label: 'Custom', desc: 'Set a custom cron schedule' },
+    const modes = [
+      { value: 'advisory_only', label: 'Advisory only', desc: 'Detects and recommends, no execution' },
+      { value: 'approval_all', label: 'Approval required for all actions', desc: 'Creates plans but requires manual approval each step' },
+      { value: 'approval_publish_distribution', label: 'Approval for publish/distribution only', desc: 'Allows safe prep, gates external impact actions' },
+      { value: 'semi_auto_rules', label: 'Semi-auto within rules', desc: 'Executes low-risk actions under guardrails' },
+      { value: 'full_auto_rules', label: 'Full auto within rules', desc: 'Autonomous execution constrained by your limits' },
+    ];
+    const presets = [
+      { id: 'safe', label: 'Safe Advisory', mode: 'advisory_only', publish: false, social: false, schema: false },
+      { id: 'editorial', label: 'Editorial Copilot', mode: 'approval_publish_distribution', publish: false, social: false, schema: true },
+      { id: 'schema', label: 'Schema Auto-Pilot', mode: 'semi_auto_rules', publish: false, social: false, schema: true },
+      { id: 'publisher', label: 'Controlled Publisher', mode: 'approval_publish_distribution', publish: true, social: false, schema: true },
+      { id: 'full', label: 'Full Search Operator', mode: 'full_auto_rules', publish: true, social: true, schema: true },
     ];
 
     el.innerHTML = `
-      <h2 class="wizard-step-title">Set Schedule</h2>
+      <h2 class="wizard-step-title">Set Automation Mode</h2>
       <div class="card" style="max-width:600px">
         <div class="radio-group">
-          ${schedules.map(s => `
-            <label class="radio-item ${wizardData.schedule === s.value ? 'selected' : ''}">
-              <input type="radio" name="schedule" value="${s.value}" ${wizardData.schedule === s.value ? 'checked' : ''}>
+          ${modes.map(s => `
+            <label class="radio-item ${wizardData.automation_mode === s.value ? 'selected' : ''}">
+              <input type="radio" name="automation_mode" value="${s.value}" ${wizardData.automation_mode === s.value ? 'checked' : ''}>
               <div>
                 <div class="radio-label">${s.label}</div>
                 <div class="radio-desc">${s.desc}</div>
@@ -2843,22 +4818,75 @@
             </label>
           `).join('')}
         </div>
+        <div class="form-group" style="margin-top:14px">
+          <label class="form-label">Quick Guardrail Presets</label>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            ${presets.map(p => `<button type="button" class="btn btn-secondary btn-sm guardrail-preset" data-id="${p.id}">${p.label}</button>`).join('')}
+          </div>
+        </div>
       </div>`;
 
-    el.querySelectorAll('input[name="schedule"]').forEach(radio => {
+    el.querySelectorAll('input[name="automation_mode"]').forEach(radio => {
       radio.addEventListener('change', () => {
-        wizardData.schedule = radio.value;
+        wizardData.automation_mode = radio.value;
         el.querySelectorAll('.radio-item').forEach(ri => ri.classList.remove('selected'));
         radio.closest('.radio-item').classList.add('selected');
+      });
+    });
+    el.querySelectorAll('.guardrail-preset').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const p = presets.find(x => x.id === btn.dataset.id);
+        if (!p) return;
+        wizardData.automation_mode = p.mode;
+        wizardData.execution_permissions.apply_schema_only = p.schema;
+        wizardData.execution_permissions.publish_content = p.publish;
+        wizardData.execution_permissions.distribute_social = p.social;
+        renderWizardSchedule(el);
       });
     });
   }
 
   function renderWizardRules(el) {
     el.innerHTML = `
-      <h2 class="wizard-step-title">Define Rules</h2>
+      <h2 class="wizard-step-title">Automation Guardrails</h2>
       <div class="card" style="max-width:600px">
-        <p class="text-sm text-muted mb-4">Set alert thresholds and action rules for your agent (optional).</p>
+        <p class="text-sm text-muted mb-4">Define approvals, permissions, and publishing boundaries.</p>
+        <div class="form-group">
+          <label class="form-label">What this operator may do without approval</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-draft" ${wizardData.execution_permissions.draft_content ? 'checked' : ''}> Draft content</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-patch" ${wizardData.execution_permissions.patch_existing_pages ? 'checked' : ''}> Patch existing pages</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-new" ${wizardData.execution_permissions.create_new_pages ? 'checked' : ''}> Create new pages</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-schema" ${wizardData.execution_permissions.apply_schema_only ? 'checked' : ''}> Apply schema</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-publish" ${wizardData.execution_permissions.publish_content ? 'checked' : ''}> Publish content</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-social" ${wizardData.execution_permissions.distribute_social ? 'checked' : ''}> Distribute social</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-index" ${wizardData.execution_permissions.submit_indexing ? 'checked' : ''}> Submit indexing</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-perm-markdown" ${wizardData.execution_permissions.update_markdown_layers ? 'checked' : ''}> Update markdown/croutons</label>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">What always requires approval</label>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <label class="checkbox-item"><input type="checkbox" id="wiz-approve-all" ${wizardData.approval_rules.require_for_all_actions ? 'checked' : ''}> All actions</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-approve-publish" ${wizardData.approval_rules.require_for_publish ? 'checked' : ''}> Publishing</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-approve-social" ${wizardData.approval_rules.require_for_distribution ? 'checked' : ''}> Social distribution</label>
+            <label class="checkbox-item"><input type="checkbox" id="wiz-block-money" ${wizardData.approval_rules.block_money_pages_without_approval ? 'checked' : ''}> Money pages</label>
+          </div>
+          <div style="margin-top:8px">
+            <label class="form-label">Max executions per day</label>
+            <input type="number" class="form-input" id="wiz-max-exec" min="1" value="${Number(wizardData.approval_rules.max_executions_per_day || 8)}">
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Where it is allowed to publish</label>
+          <input type="text" class="form-input" id="wiz-allowed-sections" placeholder="blog, docs, /guides" value="${escapeHtml((wizardData.allowed_targets.site_sections || []).join(', '))}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Allowed distribution surfaces</label>
+          <input type="text" class="form-input" id="wiz-allowed-channels" placeholder="twitter, tiktok" value="${escapeHtml((wizardData.allowed_targets.distribution_channels || []).join(', '))}">
+        </div>
+        <hr style="margin:14px 0;border:none;border-top:1px solid var(--color-border)">
+        <p class="text-sm text-muted mb-4">Optional text rules and thresholds:</p>
         <div id="rules-list">
           ${wizardData.rules.map((r, i) => `
             <div class="flex items-center gap-2 mb-4">
@@ -2888,7 +4916,7 @@
   function renderWizardReview(el) {
     const template = wizardData.templateObj || {};
     el.innerHTML = `
-      <h2 class="wizard-step-title">Review & Deploy</h2>
+      <h2 class="wizard-step-title">Review & Deploy Operator</h2>
       <div class="card" style="max-width:600px">
         <div style="display:grid;gap:16px">
           <div>
@@ -2897,7 +4925,7 @@
           </div>
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Name</div>
-            <div class="font-semibold">${escapeHtml(wizardData.name || 'Unnamed Agent')}</div>
+            <div class="font-semibold">${escapeHtml(wizardData.name || 'Unnamed Operator')}</div>
           </div>
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Description</div>
@@ -2912,8 +4940,8 @@
             <div class="text-sm">Model: <strong>${wizardData.model}</strong> · Temperature: <strong>${wizardData.temperature}</strong> · Max Tokens: <strong>${wizardData.max_tokens}</strong></div>
           </div>
           <div>
-            <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Schedule</div>
-            <div class="text-sm font-medium" style="text-transform:capitalize">${wizardData.schedule}</div>
+            <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Automation Mode</div>
+            <div class="text-sm font-medium">${escapeHtml(wizardData.automation_mode || 'approval_publish_distribution')}</div>
           </div>
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Data Scope</div>
@@ -2928,6 +4956,13 @@
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Rules</div>
             <div>${wizardData.rules.filter(r => r).map(r => `<div class="text-sm">• ${escapeHtml(r)}</div>`).join('')}</div>
           </div>` : ''}
+          <div>
+            <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Guardrails</div>
+            <div class="text-sm">Publish requires approval: <strong>${wizardData.approval_rules?.require_for_publish ? 'Yes' : 'No'}</strong></div>
+            <div class="text-sm">Distribution requires approval: <strong>${wizardData.approval_rules?.require_for_distribution ? 'Yes' : 'No'}</strong></div>
+            <div class="text-sm">Max executions/day: <strong>${Number(wizardData.approval_rules?.max_executions_per_day || 8)}</strong></div>
+            <div class="text-sm">Permissions: <strong>${Object.entries(wizardData.execution_permissions || {}).filter(([,v]) => !!v).map(([k]) => k).join(', ') || 'none'}</strong></div>
+          </div>
         </div>
       </div>`;
   }
@@ -2967,8 +5002,31 @@
         wizardData.max_tokens = parseInt(document.getElementById('wizard-tokens')?.value) || 1024;
         break;
       case 5:
+        wizardData.automation_mode = document.querySelector('input[name="automation_mode"]:checked')?.value || wizardData.automation_mode || 'approval_publish_distribution';
         break;
       case 6:
+        wizardData.execution_permissions = {
+          draft_content: !!document.getElementById('wiz-perm-draft')?.checked,
+          patch_existing_pages: !!document.getElementById('wiz-perm-patch')?.checked,
+          create_new_pages: !!document.getElementById('wiz-perm-new')?.checked,
+          apply_schema_only: !!document.getElementById('wiz-perm-schema')?.checked,
+          publish_content: !!document.getElementById('wiz-perm-publish')?.checked,
+          distribute_social: !!document.getElementById('wiz-perm-social')?.checked,
+          submit_indexing: !!document.getElementById('wiz-perm-index')?.checked,
+          update_markdown_layers: !!document.getElementById('wiz-perm-markdown')?.checked,
+        };
+        wizardData.approval_rules = {
+          require_for_all_actions: !!document.getElementById('wiz-approve-all')?.checked,
+          require_for_publish: !!document.getElementById('wiz-approve-publish')?.checked,
+          require_for_distribution: !!document.getElementById('wiz-approve-social')?.checked,
+          block_money_pages_without_approval: !!document.getElementById('wiz-block-money')?.checked,
+          max_executions_per_day: Number(document.getElementById('wiz-max-exec')?.value || 8),
+        };
+        wizardData.allowed_targets = {
+          site_sections: (document.getElementById('wiz-allowed-sections')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+          distribution_channels: (document.getElementById('wiz-allowed-channels')?.value || '').split(',').map(s => s.trim()).filter(Boolean),
+          competitor_domains: [],
+        };
         document.querySelectorAll('.rule-input').forEach(input => {
           wizardData.rules[parseInt(input.dataset.idx)] = input.value.trim();
         });
@@ -2993,29 +5051,35 @@
               schedule: wizardData.schedule,
               rules: wizardData.rules,
               data_scope: wizardData.data_scope,
+              automation_mode: wizardData.automation_mode,
+              approval_rules: wizardData.approval_rules,
+              execution_permissions: wizardData.execution_permissions,
+              allowed_targets: wizardData.allowed_targets,
+              lifecycle_state: wizardData.lifecycle_state,
+              success_metrics: wizardData.success_metrics,
             }),
           });
           // Success animation
           container.innerHTML = `
             <div class="success-anim">
               <div class="success-check"><i data-lucide="check" style="width:32px;height:32px"></i></div>
-              <h2 class="success-title">Agent Deployed!</h2>
-              <p class="success-desc">"${escapeHtml(wizardData.name)}" is now active and ready to run.</p>
+              <h2 class="success-title">Operator Deployed!</h2>
+              <p class="success-desc">"${escapeHtml(wizardData.name)}" is now active and running your search operations loop.</p>
               <div style="display:flex;gap:8px">
-                <a href="#/agents" class="btn btn-primary">View My Agents</a>
+                <a href="#/agents" class="btn btn-primary">View Operators</a>
                 <button class="btn btn-secondary" onclick="window.NC.resetWizard()">Create Another</button>
               </div>
             </div>`;
           lucide.createIcons();
-          toast('Agent deployed successfully!', 'success');
+          toast('Operator deployed successfully!', 'success');
           // Reset wizard state
           wizardStep = 0;
-          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' }, automation_mode: 'approval_publish_distribution', approval_rules: { require_for_all_actions: false, require_for_publish: true, require_for_distribution: true, block_money_pages_without_approval: true, max_executions_per_day: 8 }, execution_permissions: { draft_content: true, patch_existing_pages: true, create_new_pages: false, apply_schema_only: true, publish_content: false, distribute_social: false, submit_indexing: true, update_markdown_layers: true }, allowed_targets: { site_sections: [], distribution_channels: [], competitor_domains: [] }, lifecycle_state: 'Watching', success_metrics: [] };
           return;
         } catch (err) {
           toast(err.message, 'error');
           btn.disabled = false;
-          btn.innerHTML = 'Deploy Agent <i data-lucide="arrow-right" style="width:14px;height:14px"></i>';
+          btn.innerHTML = 'Deploy Operator <i data-lucide="arrow-right" style="width:14px;height:14px"></i>';
           lucide.createIcons({ nodes: [btn] });
           return;
         }
@@ -3034,8 +5098,8 @@
       const templates = await apiFetch('/api/templates');
       container.innerHTML = `
         <div class="page-header">
-          <h1 class="page-title">Templates</h1>
-          <p class="page-subtitle">Pre-built agent configurations to get started fast</p>
+          <h1 class="page-title">Search Operator Templates</h1>
+          <p class="page-subtitle">Purpose-built operators for SEO, AEO, GEO, citation growth, and execution workflows</p>
         </div>
         <div class="grid-3">
           ${templates.map(t => `
@@ -3046,7 +5110,7 @@
               <div class="template-card-tags" style="margin-bottom:12px">
                 ${t.tags.map(tag => `<span class="tag">${tag}</span>`).join('')}
               </div>
-              <button class="btn btn-primary btn-sm use-template-btn" data-id="${t.id}">Use Template</button>
+              <button class="btn btn-primary btn-sm use-template-btn" data-id="${t.id}">Use Operator</button>
             </div>
           `).join('')}
         </div>`;
@@ -3056,7 +5120,7 @@
       document.querySelectorAll('.use-template-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           wizardStep = 0;
-          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' }, automation_mode: 'approval_publish_distribution', approval_rules: { require_for_all_actions: false, require_for_publish: true, require_for_distribution: true, block_money_pages_without_approval: true, max_executions_per_day: 8 }, execution_permissions: { draft_content: true, patch_existing_pages: true, create_new_pages: false, apply_schema_only: true, publish_content: false, distribute_social: false, submit_indexing: true, update_markdown_layers: true }, allowed_targets: { site_sections: [], distribution_channels: [], competitor_domains: [] }, lifecycle_state: 'Watching', success_metrics: [] };
           wizardData.template_id = btn.dataset.id;
           wizardData.templateObj = templates.find(t => t.id === btn.dataset.id);
           if (wizardData.templateObj) {
@@ -3078,8 +5142,8 @@
 
     const serviceCategories = [
       {
-        label: 'Data Sources',
-        description: 'Connect analytics and search platforms for your agents to read',
+        label: 'Observe Layer',
+        description: 'Connections that power Observe, Diagnose, and Measure stages',
         services: [
           { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
           { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
@@ -3089,8 +5153,8 @@
         ]
       },
       {
-        label: 'AI Models',
-        description: 'Configure AI model access for agent intelligence',
+        label: 'Reasoning / Generation Layer',
+        description: 'Connections that power Plan and content generation',
         services: [
           { id: 'openai', name: 'OpenAI', icon: '<i data-lucide="brain" style="width:20px;height:20px;color:#10a37f"></i>', desc: 'GPT-4o, GPT-4o-mini for text generation', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'sk-...'}], badge: 'Platform Default' },
           { id: 'google_gemini', name: 'Google Gemini', icon: '<i data-lucide="sparkles" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Gemini Pro, Gemini Flash models', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
@@ -3098,15 +5162,15 @@
         ]
       },
       {
-        label: 'Deployment',
-        description: 'Push code and manage infrastructure',
+        label: 'Execution Layer',
+        description: 'Connections that publish patches, content, and distribution actions',
         services: [
           { id: 'github', name: 'GitHub', icon: '<i data-lucide="github" style="width:20px;height:20px;color:#24292f"></i>', desc: 'Push code, manage repos, deploy changes', auth: 'oauth' },
         ]
       },
       {
-        label: 'Social Publishing',
-        description: 'Post and schedule content across social platforms',
+        label: 'Distribution Surfaces',
+        description: 'Execution surfaces for social and support-content distribution',
         services: [
           { id: 'twitter', name: 'X (Twitter)', icon: '<i data-lucide="at-sign" style="width:20px;height:20px;color:#1d9bf0"></i>', desc: 'Post tweets, threads, and media', auth: 'oauth' },
           { id: 'facebook', name: 'Facebook', icon: '<i data-lucide="thumbs-up" style="width:20px;height:20px;color:#1877f2"></i>', desc: 'Post to Pages, manage engagement', auth: 'oauth' },
@@ -3124,7 +5188,7 @@
       let html = `
         <div class="page-header">
           <h1 class="page-title">Connections</h1>
-          <p class="page-subtitle">Connect services for your agents to read data, think, and act</p>
+          <p class="page-subtitle">Power the Search Ops lifecycle: Observe, Plan, Execute, and Measure</p>
         </div>`;
 
       serviceCategories.forEach(cat => {
@@ -3611,9 +5675,10 @@
   window.NC = {
     toggleSidebar,
     render,
+    inspectIntelObject: (kind, id) => showIntelInspect(kind, id),
     resetWizard: () => {
       wizardStep = 0;
-      wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
+      wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' }, automation_mode: 'approval_publish_distribution', approval_rules: { require_for_all_actions: false, require_for_publish: true, require_for_distribution: true, block_money_pages_without_approval: true, max_executions_per_day: 8 }, execution_permissions: { draft_content: true, patch_existing_pages: true, create_new_pages: false, apply_schema_only: true, publish_content: false, distribute_social: false, submit_indexing: true, update_markdown_layers: true }, allowed_targets: { site_sections: [], distribution_channels: [], competitor_domains: [] }, lifecycle_state: 'Watching', success_metrics: [] };
       navigate('#/wizard');
     },
   };
