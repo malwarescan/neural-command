@@ -1,15 +1,87 @@
-"""Middleware to patch app.js, index.html, and serve Lucide locally.
-Self-contained, no api_server.py changes needed.
-Import via Procfile: uvicorn server:app"""
-import pathlib, logging, re
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+"""Startup shim: reconstitute large files from compressed blobs, then run middleware.
+Entry point via Procfile: uvicorn server:app
+"""
+import os, pathlib, logging, re, sys
 
 logger = logging.getLogger("uvicorn.error")
-
 _BASE = pathlib.Path(__file__).parent
 
-# ── Safe Lucide wrapper: retries every 100ms for 5s if lucide not loaded yet ──
+# Load local .env for development before importing api_server.py config.
+try:
+    from dotenv import load_dotenv
+
+    dotenv_path = _BASE / ".env"
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+        logger.info("env: loaded .env from project root")
+except Exception as e:
+    logger.warning(f"env: could not load .env: {e}")
+
+# ─────────────────────────────────────────────
+# STEP 0: Reconstitute large files from blobs
+# ─────────────────────────────────────────────
+
+def _write_if_newer(blob_module: str, target_path: pathlib.Path, label: str):
+    """Load content from a blob module and write to disk if needed.
+
+    Local edits are preserved when target file is newer than blob module file.
+    """
+    try:
+        mod = __import__(blob_module)
+        blob_path = pathlib.Path(getattr(mod, "__file__", ""))
+        blob_mtime = blob_path.stat().st_mtime if blob_path.exists() else 0
+        target_mtime = target_path.stat().st_mtime if target_path.exists() else 0
+        if target_path.exists() and target_mtime > blob_mtime:
+            logger.info(f"reconstitute: kept local {label} (newer than blob)")
+            return
+
+        content = mod.get_content()
+        target_path.write_text(content, encoding="utf-8")
+        logger.info(f"reconstitute: wrote {label} ({len(content)} bytes)")
+    except Exception as e:
+        logger.warning(f"reconstitute: could not write {label}: {e}")
+
+# Reconstitute agent_tools.py (new file, needed by api_server.py)
+_write_if_newer("agent_tools_blob", _BASE / "agent_tools.py", "agent_tools.py")
+
+# Reconstitute api_server.py (main backend)
+_write_if_newer("api_server_blob", _BASE / "api_server.py", "api_server.py")
+
+# Reconstitute app.js (frontend SPA)
+_write_if_newer("app_js_blob", _BASE / "static" / "app.js", "static/app.js")
+
+# Force Python to re-discover reconstituted modules
+if "agent_tools" in sys.modules:
+    del sys.modules["agent_tools"]
+if "api_server" in sys.modules:
+    del sys.modules["api_server"]
+
+# ─────────────────────────────────────────────
+# STEP 1: Download and cache Lucide locally
+# ─────────────────────────────────────────────
+
+_LUCIDE_JS = None
+_lucide_path = _BASE / "static" / "lucide.min.js"
+if _lucide_path.exists():
+    _LUCIDE_JS = _lucide_path.read_bytes()
+    logger.info(f"lucide: loaded local copy ({len(_LUCIDE_JS)} bytes)")
+else:
+    try:
+        import urllib.request
+        url = "https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"
+        req = urllib.request.Request(url, headers={"User-Agent": "CroutonsAgents/1.0"})
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            _LUCIDE_JS = resp.read()
+        _lucide_path.parent.mkdir(parents=True, exist_ok=True)
+        _lucide_path.write_bytes(_LUCIDE_JS)
+        logger.info(f"lucide: downloaded and cached ({len(_LUCIDE_JS)} bytes)")
+    except Exception as e:
+        logger.warning(f"lucide: could not download: {e}")
+
+# ─────────────────────────────────────────────
+# STEP 2: Patch app.js at import time
+# ─────────────────────────────────────────────
+
 _SAFE_CREATE = (
     '(function(){'
     'if(typeof lucide!=="undefined"&&lucide.createIcons){lucide.createIcons()}'
@@ -19,26 +91,6 @@ _SAFE_CREATE = (
     '})()'
 )
 
-# ── Load Lucide from local file if available ──
-_LUCIDE_JS = None
-_lucide_path = _BASE / "static" / "lucide.min.js"
-if _lucide_path.exists():
-    _LUCIDE_JS = _lucide_path.read_bytes()
-    logger.info(f"lucide: loaded local copy ({len(_LUCIDE_JS)} bytes)")
-else:
-    # Download at startup if not present
-    try:
-        import urllib.request
-        url = "https://cdn.jsdelivr.net/npm/lucide@0.460.0/dist/umd/lucide.min.js"
-        req = urllib.request.Request(url, headers={"User-Agent": "CroutonsAgents/1.0"})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            _LUCIDE_JS = resp.read()
-        _lucide_path.write_bytes(_LUCIDE_JS)
-        logger.info(f"lucide: downloaded and cached ({len(_LUCIDE_JS)} bytes)")
-    except Exception as e:
-        logger.warning(f"lucide: could not download: {e}")
-
-# ── Patch app.js at import time ──
 _PATCHED_JS = None
 _appjs = _BASE / "static" / "app.js"
 if _appjs.exists():
@@ -82,23 +134,78 @@ if _appjs.exists():
         _patches += n
         logger.info(f"appjs_patches: made {n} rAF createIcons() calls safe")
 
+    # Patch 3: avoid blank page if Supabase CDN fails to load
+    _supabase_init = "supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);"
+    _supabase_safe = (
+        "if (!window.supabase || !window.supabase.createClient) {"
+        "document.getElementById('app').innerHTML = "
+        "'<div style=\"padding:2rem;text-align:center;\">"
+        "<h2>Frontend dependency failed to load</h2>"
+        "<p>Supabase SDK is unavailable. Check your network/CDN access and reload.</p>"
+        "</div>';"
+        "return;"
+        "}"
+        "supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);"
+    )
+    if _supabase_init in _c:
+        _c = _c.replace(_supabase_init, _supabase_safe)
+        _patches += 1
+        logger.info("appjs_patches: added Supabase SDK guard")
+
+    # Patch 4: show clear config error when /api/config is missing Supabase values
+    _cfg_assign = (
+        "SUPABASE_URL = cfg.supabase_url;\n"
+        "      SUPABASE_ANON_KEY = cfg.supabase_anon_key;\n"
+        "      STRIPE_PK = cfg.stripe_publishable_key || '';"
+    )
+    _cfg_safe = (
+        "SUPABASE_URL = (cfg.supabase_url || '').trim();\n"
+        "      SUPABASE_ANON_KEY = (cfg.supabase_anon_key || '').trim();\n"
+        "      STRIPE_PK = cfg.stripe_publishable_key || '';\n"
+        "      if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {\n"
+        "        document.getElementById('app').innerHTML = "
+        "'<div style=\"padding:2rem;text-align:center;\">"
+        "<h2>Missing local configuration</h2>"
+        "<p>Set SUPABASE_URL and SUPABASE_ANON_KEY, then restart the server.</p>"
+        "</div>';\n"
+        "        return;\n"
+        "      }"
+    )
+    if _cfg_assign in _c:
+        _c = _c.replace(_cfg_assign, _cfg_safe)
+        _patches += 1
+        logger.info("appjs_patches: added config guard for Supabase values")
+
     _PATCHED_JS = _c
     logger.info(f"appjs_patches: total {_patches} patches applied ({len(_c)} bytes)")
 
-# ── Patch index.html at import time ──
+# ─────────────────────────────────────────────
+# STEP 3: Patch index.html at import time
+# ─────────────────────────────────────────────
+
 _PATCHED_HTML = None
 _indexhtml = _BASE / "static" / "index.html"
 if _indexhtml.exists():
     _h = _indexhtml.read_text(encoding="utf-8")
-
-    # Replace CDN Lucide with local copy served by middleware
-    _h = _h.replace(
-        '<script src="https://unpkg.com/lucide@latest"></script>',
-        '<script src="/static/lucide.min.js"></script>',
+    # Only swap to local Lucide if we actually have bytes to serve.
+    # If local download failed, keep CDN URL so the frontend can still boot.
+    if _LUCIDE_JS:
+        _h = _h.replace(
+            '<script src="https://unpkg.com/lucide@latest"></script>',
+            '<script src="/static/lucide.min.js"></script>',
+        )
+    _PATCHED_HTML = _h
+    logger.info(
+        "html_patches: %s",
+        "switched Lucide to local serving" if _LUCIDE_JS else "kept Lucide CDN fallback",
     )
 
-    _PATCHED_HTML = _h
-    logger.info("html_patches: switched Lucide to local serving")
+# ─────────────────────────────────────────────
+# STEP 4: Import app and add middleware
+# ─────────────────────────────────────────────
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 
 class PatchMiddleware(BaseHTTPMiddleware):
@@ -138,7 +245,6 @@ class PatchMiddleware(BaseHTTPMiddleware):
         return response
 
 
-# Import the real app and patch template data
 from api_server import app
 
 # Fix AI Search Optimizer icon: strip HTML tags, keep just the icon name

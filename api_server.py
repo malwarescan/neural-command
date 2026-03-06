@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+import json as json_module
 import openai
 import stripe
 from fastapi import FastAPI, HTTPException, Request, Depends, Header
@@ -23,6 +24,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, EmailStr
+
+from agent_tools import (
+    get_tools_for_connections,
+    execute_tool,
+    build_tools_system_prompt_addon,
+)
 
 # ─────────────────────────────────────────────
 # Configuration
@@ -615,7 +622,8 @@ class AgentCreateRequest(BaseModel):
     system_prompt: Optional[str] = None
     goals: Optional[list] = []
     schedule: Optional[str] = None
-    rules: Optional[list] = []
+    rules: Optional[Any] = []
+    data_scope: Optional[dict] = None
 
 
 class AgentUpdateRequest(BaseModel):
@@ -628,7 +636,95 @@ class AgentUpdateRequest(BaseModel):
     system_prompt: Optional[str] = None
     goals: Optional[list] = None
     schedule: Optional[str] = None
-    rules: Optional[list] = None
+    rules: Optional[Any] = None
+    data_scope: Optional[dict] = None
+
+
+def _normalize_data_scope(data_scope: Any) -> dict:
+    """Normalize selected data scope for an agent."""
+    if not isinstance(data_scope, dict):
+        return {}
+
+    cleaned = {}
+    github_repo = (data_scope.get("github_repo") or "").strip()
+    gsc_site = (data_scope.get("gsc_site") or "").strip()
+    bing_site = (data_scope.get("bing_site") or "").strip()
+
+    if github_repo:
+        cleaned["github_repo"] = github_repo
+    if gsc_site:
+        cleaned["gsc_site"] = gsc_site
+    if bing_site:
+        cleaned["bing_site"] = bing_site
+    return cleaned
+
+
+def _extract_rule_text_rules(raw_rules: Any) -> list[str]:
+    """Return text rule list from legacy/new rules payloads."""
+    if isinstance(raw_rules, list):
+        return [str(r).strip() for r in raw_rules if str(r).strip()]
+    if isinstance(raw_rules, dict):
+        text_rules = raw_rules.get("text_rules")
+        if isinstance(text_rules, list):
+            return [str(r).strip() for r in text_rules if str(r).strip()]
+    return []
+
+
+def _extract_data_scope(raw_rules: Any) -> dict:
+    """Return data scope from rules payload."""
+    if isinstance(raw_rules, dict):
+        return _normalize_data_scope(raw_rules.get("data_scope"))
+    return {}
+
+
+def _build_rules_payload(raw_rules: Any, data_scope: Optional[dict] = None) -> dict:
+    """Store rules in a backward-compatible object structure."""
+    scope = _normalize_data_scope(data_scope)
+    text_rules = _extract_rule_text_rules(raw_rules)
+
+    # Preserve existing scope if caller didn't explicitly provide one.
+    if not scope:
+        scope = _extract_data_scope(raw_rules)
+
+    return {"text_rules": text_rules, "data_scope": scope}
+
+
+def _build_scope_prompt_addon(scope: dict) -> str:
+    if not scope:
+        return ""
+    parts = []
+    if scope.get("github_repo"):
+        parts.append(f"- GitHub repo: {scope['github_repo']}")
+    if scope.get("gsc_site"):
+        parts.append(f"- Google Search Console property: {scope['gsc_site']}")
+    if scope.get("bing_site"):
+        parts.append(f"- Bing Webmaster property: {scope['bing_site']}")
+    if not parts:
+        return ""
+    return (
+        "\n\n--- AGENT DATA SCOPE ---\n"
+        "You are scoped to these selected assets. Prefer these targets for analysis and actions:\n"
+        + "\n".join(parts)
+        + "\nDo not switch to other repos/properties unless the user explicitly asks.\n"
+        "--- END AGENT DATA SCOPE ---\n"
+    )
+
+
+def _apply_scope_to_tool_args(tool_name: str, tool_args: dict, scope: dict) -> dict:
+    """Inject selected scope defaults into tool calls."""
+    args = dict(tool_args or {})
+
+    github_repo = (scope.get("github_repo") or "").strip()
+    if github_repo and tool_name.startswith("github_") and "/" in github_repo:
+        owner, repo = github_repo.split("/", 1)
+        args["owner"] = owner
+        args["repo"] = repo
+
+    gsc_site = (scope.get("gsc_site") or "").strip()
+    if gsc_site and tool_name.startswith("gsc_"):
+        args["site_url"] = gsc_site
+
+    return args
 
 
 class AgentRunRequest(BaseModel):
@@ -858,7 +954,7 @@ async def create_agent(body: AgentCreateRequest, user: dict = Depends(get_curren
         "system_prompt": system_prompt,
         "goals": body.goals or [],
         "schedule": body.schedule,
-        "rules": body.rules or [],
+        "rules": _build_rules_payload(body.rules, body.data_scope),
         "total_runs": 0,
         "total_tokens_used": 0,
         "created_at": now,
@@ -911,12 +1007,28 @@ async def update_agent(agent_id: str, body: AgentUpdateRequest, user: dict = Dep
         logger.error(f"update_agent ownership check error: {e}")
         raise HTTPException(status_code=500, detail="Failed to verify agent ownership")
 
+    existing_agent = rows[0]
     update_data: dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
     for field in ["name", "description", "status", "model", "temperature", "max_tokens",
-                  "system_prompt", "goals", "schedule", "rules"]:
+                  "system_prompt", "goals", "schedule"]:
         val = getattr(body, field, None)
         if val is not None:
             update_data[field] = val
+
+    if body.rules is not None or body.data_scope is not None:
+        if body.rules is None:
+            rules_payload = {
+                "text_rules": _extract_rule_text_rules(existing_agent.get("rules")),
+                "data_scope": _normalize_data_scope(body.data_scope),
+            }
+        elif body.data_scope is None:
+            rules_payload = {
+                "text_rules": _extract_rule_text_rules(body.rules),
+                "data_scope": _extract_data_scope(existing_agent.get("rules")),
+            }
+        else:
+            rules_payload = _build_rules_payload(body.rules, body.data_scope)
+        update_data["rules"] = rules_payload
 
     try:
         result = await sb_patch(
@@ -956,6 +1068,100 @@ async def delete_agent(agent_id: str, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.error(f"delete_agent error: {e}")
         raise HTTPException(status_code=500, detail="Failed to delete agent")
+
+
+@app.get("/api/agent-scope/options")
+async def get_agent_scope_options(user: dict = Depends(get_current_user)):
+    """Return selectable data scope options for agent configuration."""
+    user_id = user["id"]
+
+    github_repos: list[str] = []
+    gsc_sites: list[str] = []
+    bing_sites: list[str] = []
+
+    try:
+        conn_rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "is_active": "eq.true"},
+        )
+    except Exception as e:
+        logger.error(f"get_agent_scope_options: failed to load connections: {e}")
+        conn_rows = []
+
+    tokens: dict[str, str] = {}
+    for conn in (conn_rows or []):
+        svc_name = conn.get("service", "")
+        creds = conn.get("credentials", {}) or {}
+        token = creds.get("access_token") or creds.get("api_key") or ""
+        if svc_name and token:
+            tokens[svc_name] = token
+
+    async with httpx.AsyncClient(timeout=20) as client:
+        gh_token = tokens.get("github")
+        if gh_token:
+            try:
+                r = await client.get(
+                    "https://api.github.com/user/repos",
+                    params={"type": "all", "sort": "updated", "per_page": 100},
+                    headers={
+                        "Authorization": f"Bearer {gh_token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                )
+                if r.status_code == 200:
+                    github_repos = sorted(
+                        [repo.get("full_name", "") for repo in (r.json() or []) if repo.get("full_name")]
+                    )
+            except Exception as e:
+                logger.warning(f"get_agent_scope_options: github fetch failed: {e}")
+
+        gsc_token = tokens.get("google_search_console")
+        if gsc_token:
+            try:
+                r = await client.get(
+                    "https://www.googleapis.com/webmasters/v3/sites",
+                    headers={"Authorization": f"Bearer {gsc_token}"},
+                )
+                if r.status_code == 200:
+                    gsc_sites = sorted(
+                        [site.get("siteUrl", "") for site in (r.json().get("siteEntry") or []) if site.get("siteUrl")]
+                    )
+            except Exception as e:
+                logger.warning(f"get_agent_scope_options: gsc fetch failed: {e}")
+
+        bing_token = tokens.get("bing_webmaster")
+        if bing_token:
+            try:
+                r = await client.get(
+                    "https://ssl.bing.com/webmaster/api.svc/json/GetUserSites",
+                    headers={"Authorization": f"Bearer {bing_token}"},
+                )
+                if r.status_code == 200:
+                    payload = r.json() or {}
+                    candidate_sites = []
+                    if isinstance(payload.get("d"), dict):
+                        d = payload.get("d") or {}
+                        candidate_sites.extend(d.get("Results") or [])
+                        candidate_sites.extend(d.get("results") or [])
+                    if isinstance(payload.get("sites"), list):
+                        candidate_sites.extend(payload.get("sites") or [])
+                    for entry in candidate_sites:
+                        if isinstance(entry, str) and entry:
+                            bing_sites.append(entry)
+                        elif isinstance(entry, dict):
+                            site_url = entry.get("Url") or entry.get("url") or entry.get("siteUrl")
+                            if site_url:
+                                bing_sites.append(site_url)
+                    bing_sites = sorted(list(set(bing_sites)))
+            except Exception as e:
+                logger.warning(f"get_agent_scope_options: bing fetch failed: {e}")
+
+    return {
+        "github_repos": github_repos,
+        "gsc_sites": gsc_sites,
+        "bing_sites": bing_sites,
+    }
 
 
 # ─────────────────────────────────────────────
@@ -1018,6 +1224,15 @@ async def run_agent(agent_id: str, body: AgentRunRequest, user: dict = Depends(g
     goals = agent.get("goals") or []
     if goals:
         system_prompt += f"\n\nYour current goals:\n" + "\n".join(f"- {g}" for g in goals)
+
+    text_rules = _extract_rule_text_rules(agent.get("rules"))
+    if text_rules:
+        system_prompt += "\n\nYour operating rules:\n" + "\n".join(f"- {r}" for r in text_rules)
+
+    data_scope = _extract_data_scope(agent.get("rules"))
+    scope_addon = _build_scope_prompt_addon(data_scope)
+    if scope_addon:
+        system_prompt += scope_addon
 
     # 4. Call OpenAI
 
@@ -1209,7 +1424,11 @@ async def get_agent_runs(agent_id: str, user: dict = Depends(get_current_user)):
 
 @app.post("/api/agents/{agent_id}/chat")
 async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends(get_current_user)):
-    """Conversational chat endpoint that maintains message history."""
+    """Conversational chat endpoint with tool-calling support.
+    
+    Agents can use connected services (GitHub, GSC, GA, etc.) via OpenAI function calling.
+    The tool-call loop runs up to 10 iterations to prevent runaway execution.
+    """
     user_id = user["id"]
     started_at = datetime.now(timezone.utc)
     t0 = time.monotonic()
@@ -1249,7 +1468,25 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
     except Exception as e:
         logger.error(f"chat_agent limit check error: {e}")
 
-    # 3. Build system prompt
+    # 3. Load user's active connections and their tokens
+    active_services = []
+    service_tokens = {}  # service_name -> access_token
+    try:
+        conn_rows = await sb_get(
+            "/rest/v1/connections",
+            params={"user_id": f"eq.{user_id}", "is_active": "eq.true"},
+        )
+        for conn in (conn_rows or []):
+            svc_name = conn.get("service", "")
+            creds = conn.get("credentials", {}) or {}
+            token = creds.get("access_token") or creds.get("api_key") or ""
+            if svc_name and token:
+                active_services.append(svc_name)
+                service_tokens[svc_name] = token
+    except Exception as e:
+        logger.warning(f"chat_agent: could not load connections: {e}")
+
+    # 4. Build system prompt
     template_id = agent.get("template_id", "custom")
     if template_id == "custom" and agent.get("system_prompt"):
         system_prompt = agent["system_prompt"]
@@ -1265,7 +1502,21 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
     if goals:
         system_prompt += f"\n\nYour current goals:\n" + "\n".join(f"- {g}" for g in goals)
 
-    # 4. Load last 20 runs from agent_runs for conversation context
+    text_rules = _extract_rule_text_rules(agent.get("rules"))
+    if text_rules:
+        system_prompt += "\n\nYour operating rules:\n" + "\n".join(f"- {r}" for r in text_rules)
+
+    data_scope = _extract_data_scope(agent.get("rules"))
+    scope_addon = _build_scope_prompt_addon(data_scope)
+    if scope_addon:
+        system_prompt += scope_addon
+
+    # Add connected services info to system prompt
+    tools_addon = build_tools_system_prompt_addon(active_services)
+    if tools_addon:
+        system_prompt += tools_addon
+
+    # 5. Load last 10 runs from agent_runs for conversation context
     history_messages = []
     try:
         history_rows = await sb_get(
@@ -1289,7 +1540,7 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
     except Exception as e:
         logger.warning(f"chat_agent: could not load message history: {e}")
 
-    # 5. Build full messages list: system + history + new user message
+    # 6. Build full messages list: system + history + new user message
     model = agent.get("model", "gpt-4o-mini")
     temperature = agent.get("temperature", 0.7)
     max_tokens = agent.get("max_tokens", 1024)
@@ -1302,7 +1553,10 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
     messages.extend(history_messages)
     messages.append({"role": "user", "content": user_message})
 
-    # 6. Insert run record
+    # 7. Build tools list from active connections
+    tools = get_tools_for_connections(active_services)
+
+    # 8. Insert run record
     run_id = None
     now_iso = started_at.isoformat()
     try:
@@ -1321,14 +1575,70 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
     except Exception as e:
         logger.warning(f"chat_agent: failed to insert run record: {e}")
 
-    # 7. Call OpenAI
+    # 9. Call OpenAI with tool-calling loop
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    tool_calls_made = []
+    MAX_TOOL_ITERATIONS = 10
+
     try:
-        completion = await openai_client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=temperature,
-            max_tokens=max_tokens,
-        )
+        for iteration in range(MAX_TOOL_ITERATIONS):
+            # Build the API call kwargs
+            api_kwargs = {
+                "model": model,
+                "messages": messages,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+            if tools:
+                api_kwargs["tools"] = tools
+                api_kwargs["tool_choice"] = "auto"
+
+            completion = await openai_client.chat.completions.create(**api_kwargs)
+
+            # Track token usage across iterations
+            total_prompt_tokens += completion.usage.prompt_tokens
+            total_completion_tokens += completion.usage.completion_tokens
+
+            choice = completion.choices[0]
+            assistant_message = choice.message
+
+            # If no tool calls, we have the final response
+            if not assistant_message.tool_calls:
+                response_text = assistant_message.content or ""
+                break
+
+            # Process tool calls
+            # Append the assistant message with tool_calls to the conversation
+            messages.append(assistant_message.model_dump())
+
+            for tc in assistant_message.tool_calls:
+                fn_name = tc.function.name
+                try:
+                    fn_args = json_module.loads(tc.function.arguments)
+                except Exception:
+                    fn_args = {}
+
+                logger.info(f"Agent tool call: {fn_name}({json_module.dumps(fn_args)[:200]})")
+                tool_calls_made.append({"tool": fn_name, "args_preview": json_module.dumps(fn_args)[:200]})
+
+                # Execute the tool
+                scoped_args = _apply_scope_to_tool_args(fn_name, fn_args, data_scope)
+                tool_result = await execute_tool(fn_name, scoped_args, service_tokens)
+
+                # Append tool result to conversation
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": tool_result,
+                })
+
+            # Continue the loop — OpenAI will process tool results and either
+            # call more tools or produce a final response
+        else:
+            # Hit max iterations — get whatever response we can
+            response_text = assistant_message.content or "I've reached the maximum number of operations for this request. Here's what I found so far."
+
     except openai.RateLimitError:
         if run_id:
             await _fail_run(run_id, "OpenAI rate limit exceeded")
@@ -1343,28 +1653,30 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
             await _fail_run(run_id, str(e))
         raise HTTPException(status_code=500, detail="AI execution failed")
 
-    # 9. Parse response
+    # 10. Finalize metrics
     duration_ms = int((time.monotonic() - t0) * 1000)
-    response_text = completion.choices[0].message.content
-    prompt_tokens = completion.usage.prompt_tokens
-    completion_tokens = completion.usage.completion_tokens
-    total_tokens = completion.usage.total_tokens
+    prompt_tokens = total_prompt_tokens
+    completion_tokens = total_completion_tokens
+    total_tokens = prompt_tokens + completion_tokens
     cost_usd, price_usd = calculate_cost(model, prompt_tokens, completion_tokens)
     completed_at = datetime.now(timezone.utc).isoformat()
 
-    # 8. Update DB records (run, usage, profile counters, agent stats)
+    # 11. Update DB records (run, usage, profile counters, agent stats)
     try:
         if run_id:
+            output_data = {
+                "response": response_text,
+                "model": model,
+                "finish_reason": "stop",
+            }
+            if tool_calls_made:
+                output_data["tool_calls"] = tool_calls_made
             await sb_patch(
                 "/rest/v1/agent_runs",
                 params={"id": f"eq.{run_id}"},
                 data={
                     "status": "completed",
-                    "output_data": {
-                        "response": response_text,
-                        "model": model,
-                        "finish_reason": completion.choices[0].finish_reason,
-                    },
+                    "output_data": output_data,
                     "prompt_tokens": prompt_tokens,
                     "completion_tokens": completion_tokens,
                     "total_tokens": total_tokens,
@@ -1410,7 +1722,7 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
         logger.error(f"chat_agent DB update error: {e}")
         # Don't fail the response — the AI already ran
 
-    return {
+    result = {
         "message": response_text,
         "run_id": run_id,
         "usage": {
@@ -1422,6 +1734,9 @@ async def chat_agent(agent_id: str, body: AgentChatRequest, user: dict = Depends
         },
         "duration_ms": duration_ms,
     }
+    if tool_calls_made:
+        result["tools_used"] = [tc["tool"] for tc in tool_calls_made]
+    return result
 
 
 @app.get("/api/agents/{agent_id}/messages")
@@ -2066,6 +2381,21 @@ async def test_connection(service: str, user: dict = Depends(get_current_user)):
                 else:
                     raise HTTPException(status_code=400, detail=f"Google Analytics returned {r.status_code}")
 
+            elif service == "google_gemini":
+                r = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": access_token},
+                )
+                tested = True
+                if r.status_code == 200:
+                    models = (r.json() or {}).get("models", [])
+                    details = {
+                        "model_count": len(models),
+                        "sample_models": [m.get("name", "").replace("models/", "") for m in models[:5]],
+                    }
+                else:
+                    raise HTTPException(status_code=400, detail=f"Google Gemini returned {r.status_code}")
+
             elif service == "github":
                 r = await client.get(
                     "https://api.github.com/user",
@@ -2091,6 +2421,18 @@ async def test_connection(service: str, user: dict = Depends(get_current_user)):
                     details = r.json().get("data", {})
                 else:
                     raise HTTPException(status_code=400, detail=f"Twitter returned {r.status_code}")
+
+            elif service == "tiktok":
+                r = await client.get(
+                    "https://open.tiktokapis.com/v2/user/info/",
+                    params={"fields": "open_id,display_name,username"},
+                    headers={"Authorization": f"Bearer {access_token}"},
+                )
+                tested = True
+                if r.status_code == 200:
+                    details = (r.json().get("data") or {}).get("user", {})
+                else:
+                    raise HTTPException(status_code=400, detail=f"TikTok returned {r.status_code}")
 
             elif service == "cloudflare":
                 r = await client.get(
@@ -3078,6 +3420,37 @@ async def get_config():
 # ─────────────────────────────────────────────
 
 import pathlib
+
+# ── Serve app.js with runtime patches ──
+_APP_JS_CONTENT = None
+try:
+    from app_js_blob import get_app_js as _get_app_js_blob
+    _APP_JS_CONTENT = _get_app_js_blob()
+    logger.info(f"Loaded app.js from blob: {len(_APP_JS_CONTENT)} bytes")
+except Exception as _e:
+    logger.warning(f"app_js_blob not available, falling back to static file: {_e}")
+    static_path = pathlib.Path(__file__).parent / "static" / "app.js"
+    if static_path.exists():
+        _APP_JS_CONTENT = static_path.read_text(encoding="utf-8")
+        logger.info(f"Loaded app.js from static file: {len(_APP_JS_CONTENT)} bytes")
+
+# Apply runtime patches
+try:
+    from appjs_patches import apply_patches
+    if _APP_JS_CONTENT:
+        _APP_JS_CONTENT = apply_patches(_APP_JS_CONTENT)
+except Exception as _pe:
+    logger.warning(f"Could not apply app.js patches: {_pe}")
+
+
+@app.get("/static/app.js")
+async def serve_app_js():
+    """Serve the full app.js (from blob or static file, with runtime patches)."""
+    if _APP_JS_CONTENT:
+        return HTMLResponse(content=_APP_JS_CONTENT, media_type="application/javascript",
+                           headers={"Cache-Control": "public, max-age=3600"})
+    raise HTTPException(status_code=404, detail="app.js not found")
+
 
 STATIC_DIR = pathlib.Path(__file__).parent / "static"
 if STATIC_DIR.exists():

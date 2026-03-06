@@ -33,7 +33,9 @@
     max_tokens: 1024,
     schedule: 'daily',
     rules: [],
+    data_scope: { github_repo: '', gsc_site: '', bing_site: '' },
   };
+  let scopeOptionsCache = null;
 
   // ── LOGO SVG ───────────────────────────────
   const LOGO_SVG = `<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAADRklEQVR42q1Xv0o7QRD+Zu+id+eBbUolRXwBwcIm2ATEWiwEG9/DNxBstLMRfAkVK0F8AgURzk6LSPxDQi4zv0L22NvbvZzhN7Bks7c7Mzv7zTe7JL8CIgIA6L6IAEAx7hLfHFPfrDUkemSGmAt9BuYZD1279+3u5eUF9/f3eH19xXg8xmAwQBRFSNMUcRxjdXUVGxsbaLfbJV2mDlMvEQEiIswsdXJzcyO9Xk8ACBGVfgGIUqoYC8NQdnd35fn5uaTDZwP2B/M/M8v5+bkQUdG0UV/T81qtltze3lb02X24PJtOpyIi8vj4WOyubtdKKadzSZLI19eXMHNhkJkL/cws8HnGzHJwcOA0Xjdmfzs+Pi7ptKXIAhcYV1ZWkGUZ7ETp9XrY3t5Gp9NBq9XC09MTLi8v8fDwUEH61tYWrq6uatPLK0EQVELe7/e98zudTiUy3W7XiwMREVWX+8xcREX3+/2+lye63W4l1d7e3pDneTHPJDkAUHXEo5t5NMPhsGTEVJxlWSnvRQSDwQDMXHFMj4U+B1zkMYvhTk9PkWUZoiiCiCDPcywtLSEIgopjSqlfJsQfRIePmQsFZu3Y3Nz0Uq+PGVUTo6Zx0/uCTq3dmSG29ZjRJKLZDugFPoMaoHYl1U7WVU4RaR6BOjEjYmaOudalh4igZlXjuu92OLUzrnU+PcoOiW6maBSbIbaB5jtzX5nXEpoKTO/NidPpFEopMLMX4UopXF9f4+7uDnEcg4gwmUyQJAkODw8Rx7H7QlNHxWZ51dR6dHRUolRd2URE9vb2nGuGw6G3HCvf+fgQbO9ARw0A2u12JYJpmtaCUtWh376cahLysaSZpuaYjY9KLbALhJn7PhT78tqe9/n5WdJfAbLvViwiODs7KwAIAKPRCMvLy3h/f0eapiWDo9EICwsLEBFEUQRmBjMjjmPs7+9jcXHRTdPSQEzwXFxcOG9ERCQnJye1tx+XqKZFSMtkMqnUdd0fj8dOwNWyKP6DaEeCIEDDd878DvgMEBHyPG+887kcEBF8f397s+Lj4+PP0QubGDXPdW1tDTs7O0iSpOAEIsLPzw/W19crqTYrIo0fp77C8peX8dxH4Cq7LgJrepc05R/lAHQj/5htrwAAAABJRU5ErkJggg==" alt="Croutons" style="width:100%;height:100%;object-fit:contain;">`;
@@ -77,6 +79,36 @@
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+  }
+
+  function normalizeRulesBundle(rules) {
+    if (Array.isArray(rules)) {
+      return { text_rules: rules.filter(Boolean), data_scope: {} };
+    }
+    if (rules && typeof rules === 'object') {
+      return {
+        text_rules: Array.isArray(rules.text_rules) ? rules.text_rules.filter(Boolean) : [],
+        data_scope: (rules.data_scope && typeof rules.data_scope === 'object') ? rules.data_scope : {},
+      };
+    }
+    return { text_rules: [], data_scope: {} };
+  }
+
+  function getAgentDataScope(agent) {
+    const bundle = normalizeRulesBundle(agent?.rules);
+    const scope = bundle.data_scope || {};
+    return {
+      github_repo: scope.github_repo || '',
+      gsc_site: scope.gsc_site || '',
+      bing_site: scope.bing_site || '',
+    };
+  }
+
+  async function loadScopeOptions(force = false) {
+    if (!force && scopeOptionsCache) return scopeOptionsCache;
+    const opts = await apiFetch('/api/agent-scope/options');
+    scopeOptionsCache = opts || { github_repos: [], gsc_sites: [], bing_sites: [] };
+    return scopeOptionsCache;
   }
 
   // ── TOAST ──────────────────────────────────
@@ -438,7 +470,7 @@
     }
   }
 
-  // ── PAGE CONTENT ROUTER ──────────────────────
+  // ── PAGE CONTENT ROUTER ────────────────────
   function renderPageContent(route) {
     const main = document.getElementById('main-content');
     if (!main) return;
@@ -459,7 +491,7 @@
     else renderDashboard(main);
   }
 
-  // ── DASHBOARD VIEW ───────────────────────────
+  // ── DASHBOARD VIEW ─────────────────────────
   async function renderDashboard(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -1724,7 +1756,7 @@
 
 
 
-  // ── AGENT DETAIL VIEW (Tabbed Workspace) ──────────────
+  // ── AGENT DETAIL VIEW (Tabbed Workspace) ──────────────────────
   async function renderAgentDetail(container, agentId) {
     const templateIcons = { seo: '<i data-lucide="search" style="width:20px;height:20px"></i>', social: '<i data-lucide="share-2" style="width:20px;height:20px"></i>', sales: '<i data-lucide="briefcase" style="width:20px;height:20px"></i>', support: '<i data-lucide="headphones" style="width:20px;height:20px"></i>', content: '<i data-lucide="pen-tool" style="width:20px;height:20px"></i>', analytics: '<i data-lucide="bar-chart-3" style="width:20px;height:20px"></i>', custom: '<i data-lucide="settings" style="width:20px;height:20px"></i>' };
     let activeTab = 'chat';
@@ -1887,7 +1919,7 @@
       }
     }
 
-    function appendMessage(role, content, timestamp, tokens) {
+    function appendMessage(role, content, timestamp, tokens, toolsUsed) {
       const messagesEl = document.getElementById('chat-messages');
       if (!messagesEl) return;
 
@@ -1910,11 +1942,24 @@
       if (timestamp) metaParts.push(timeAgo(timestamp));
       if (!isUser && !isError && tokens) metaParts.push(`${tokens} tokens`);
       const metaHtml = metaParts.length > 0
-        ? `<div class="chat-message-meta">${metaParts.join(' · ')}</div>`
+        ? `<div class="chat-message-meta">${metaParts.join(' \u00b7 ')}</div>`
         : '';
 
-      msgEl.innerHTML = `<div>${escapeHtml(content)}</div>${metaHtml}`;
+      // Show tools used badge
+      let toolsHtml = '';
+      if (toolsUsed && toolsUsed.length > 0) {
+        const toolNames = toolsUsed.map(t => {
+          // Clean up tool names for display
+          return t.replace(/_/g, ' ').replace(/^github /, 'GitHub: ').replace(/^gsc /, 'GSC: ').replace(/^ga /, 'GA: ');
+        });
+        toolsHtml = `<div class="chat-tools-used" style="margin-top:6px;padding:6px 10px;background:var(--bg-tertiary, #f0f4f8);border-radius:6px;font-size:12px;color:var(--text-secondary, #64748b)"><i data-lucide="wrench" style="width:12px;height:12px;display:inline-block;vertical-align:middle;margin-right:4px"></i>Tools used: ${toolNames.join(', ')}</div>`;
+      }
+
+      msgEl.innerHTML = `<div>${escapeHtml(content)}</div>${toolsHtml}${metaHtml}`;
       messagesEl.appendChild(msgEl);
+      if (typeof lucide !== 'undefined' && lucide.createIcons) {
+        try { lucide.createIcons({ nodes: [msgEl] }); } catch(e) {}
+      }
     }
 
     function appendTypingIndicator() {
@@ -1963,7 +2008,8 @@
         if (typingEl) typingEl.remove();
         const response = result.response || result.output?.response || result.message || 'No response';
         const tokens = result.usage?.total_tokens || result.tokens || null;
-        appendMessage('assistant', response, new Date().toISOString(), tokens);
+        const toolsUsed = result.tools_used || null;
+        appendMessage('assistant', response, new Date().toISOString(), tokens, toolsUsed);
         scrollToBottom();
       } catch (err) {
         if (typingEl) typingEl.remove();
@@ -2077,6 +2123,7 @@
 
     // ── TAB 3: SETTINGS ──
     function renderSettingsTab(tabContent) {
+      const agentScope = getAgentDataScope(agent);
       tabContent.innerHTML = `
         <div style="padding:20px">
           <!-- Config Form -->
@@ -2124,6 +2171,21 @@
                   : '<span class="text-muted">No goals set</span>'}
               </div>
             </div>
+            <div class="form-group" style="margin-top:16px">
+              <label class="form-label">Data Scope</label>
+              <div class="text-xs text-muted" style="margin-bottom:8px">Limit this agent to a selected repo/property set.</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px">
+                <select class="form-select scope-field" data-scope-field="github_repo" id="agent-scope-repo">
+                  <option value="">Any connected repository</option>
+                </select>
+                <select class="form-select scope-field" data-scope-field="gsc_site" id="agent-scope-gsc">
+                  <option value="">Any connected GSC property</option>
+                </select>
+                <select class="form-select scope-field" data-scope-field="bing_site" id="agent-scope-bing">
+                  <option value="">Any connected Bing property</option>
+                </select>
+              </div>
+            </div>
           </div>
 
           <!-- Danger Zone -->
@@ -2159,6 +2221,36 @@
         });
       });
 
+      (async () => {
+        try {
+          const options = await loadScopeOptions();
+          const repoSel = document.getElementById('agent-scope-repo');
+          const gscSel = document.getElementById('agent-scope-gsc');
+          const bingSel = document.getElementById('agent-scope-bing');
+          if (!repoSel || !gscSel || !bingSel) return;
+
+          const repoOptions = options.github_repos || [];
+          const gscOptions = options.gsc_sites || [];
+          const bingOptions = options.bing_sites || [];
+
+          repoSel.innerHTML = `<option value="">Any connected repository</option>${repoOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+          gscSel.innerHTML = `<option value="">Any connected GSC property</option>${gscOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+          bingSel.innerHTML = `<option value="">Any connected Bing property</option>${bingOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+
+          repoSel.value = agentScope.github_repo || '';
+          gscSel.value = agentScope.gsc_site || '';
+          bingSel.value = agentScope.bing_site || '';
+        } catch (err) {
+          // keep empty defaults if options fetch fails
+        }
+      })();
+
+      tabContent.querySelectorAll('.scope-field').forEach(field => {
+        field.addEventListener('change', () => {
+          if (saveBtn) saveBtn.style.display = 'inline-flex';
+        });
+      });
+
       saveBtn?.addEventListener('click', async () => {
         const updateData = {};
         tabContent.querySelectorAll('.config-field').forEach(field => {
@@ -2167,6 +2259,12 @@
           if (key === 'temperature') val = parseFloat(val);
           updateData[key] = val;
         });
+        const data_scope = {
+          github_repo: document.getElementById('agent-scope-repo')?.value || '',
+          gsc_site: document.getElementById('agent-scope-gsc')?.value || '',
+          bing_site: document.getElementById('agent-scope-bing')?.value || '',
+        };
+        updateData.data_scope = data_scope;
         const origHtml = saveBtn.innerHTML;
         saveBtn.disabled = true;
         saveBtn.innerHTML = '<div class="loading-spinner" style="width:14px;height:14px;border-width:2px"></div> Saving...';
@@ -2287,7 +2385,7 @@
       <div class="grid-3">
         ${wizardTemplates.map(t => `
           <div class="template-card ${wizardData.template_id === t.id ? 'selected' : ''}" data-id="${t.id}">
-            <div class="template-card-icon">${t.icon}</div>
+            <div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>
             <div class="template-card-name">${escapeHtml(t.name)}</div>
             <div class="template-card-desc">${escapeHtml(t.description)}</div>
             <div class="template-card-tags">
@@ -2296,6 +2394,8 @@
           </div>
         `).join('')}
       </div>`;
+
+    lucide.createIcons();
 
     el.querySelectorAll('.template-card').forEach(card => {
       card.addEventListener('click', () => {
@@ -2363,37 +2463,68 @@
   }
 
   function renderWizardConnect(el) {
-    const services = [
-      { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>' },
-      { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>' },
-      { id: 'social_media', name: 'Social Media', icon: '<i data-lucide="share-2" style="width:20px;height:20px;color:#1d9bf0"></i>' },
-      { id: 'crm', name: 'CRM', icon: '<i data-lucide="briefcase" style="width:20px;height:20px;color:#7c3aed"></i>' },
-      { id: 'email', name: 'Email', icon: '<i data-lucide="mail" style="width:20px;height:20px;color:#10b981"></i>' },
-      { id: 'custom_api', name: 'Custom API', icon: '<i data-lucide="plug" style="width:20px;height:20px;color:#94a3b8"></i>' },
-    ];
-
     el.innerHTML = `
       <h2 class="wizard-step-title">Connect Services</h2>
       <p class="text-sm text-muted mb-4">Optional: connect external services your agent can use.</p>
-      <div class="grid-3">
-        ${services.map(s => `
-          <div class="connection-card">
-            <div class="connection-icon">${s.icon}</div>
-            <div class="connection-info">
-              <div class="connection-name">${s.name}</div>
-              <div class="connection-status">
-                <span class="connection-status-dot"></span>
-                <span>Not connected</span>
-              </div>
-            </div>
-            <button class="btn btn-secondary btn-sm connect-service-btn" data-service="${s.id}" data-name="${s.name}">Connect</button>
-          </div>
-        `).join('')}
+      <div class="card" style="max-width:760px;margin-bottom:16px">
+        <div class="form-group">
+          <label class="form-label">Scoped GitHub Repository</label>
+          <select class="form-select" id="wizard-scope-repo">
+            <option value="">Any connected repository</option>
+          </select>
+          <div class="text-xs text-muted" style="margin-top:6px">Agent code edits and PRs will default to this repo.</div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Scoped Google Search Console Property</label>
+          <select class="form-select" id="wizard-scope-gsc">
+            <option value="">Any connected GSC property</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Scoped Bing Webmaster Property</label>
+          <select class="form-select" id="wizard-scope-bing">
+            <option value="">Any connected Bing property</option>
+          </select>
+        </div>
+      </div>
+      <div class="card" style="max-width:760px">
+        <div class="text-sm text-muted" id="wizard-scope-loading">Loading selectable data sources...</div>
       </div>`;
 
-    el.querySelectorAll('.connect-service-btn').forEach(btn => {
-      btn.addEventListener('click', () => showApiKeyModal(btn.dataset.service, btn.dataset.name, [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}]));
-    });
+    (async () => {
+      try {
+        const options = await loadScopeOptions();
+        const repoSel = document.getElementById('wizard-scope-repo');
+        const gscSel = document.getElementById('wizard-scope-gsc');
+        const bingSel = document.getElementById('wizard-scope-bing');
+        const loadingEl = document.getElementById('wizard-scope-loading');
+        if (!repoSel || !gscSel || !bingSel) return;
+
+        const repoOptions = options.github_repos || [];
+        const gscOptions = options.gsc_sites || [];
+        const bingOptions = options.bing_sites || [];
+
+        repoSel.innerHTML = `<option value="">Any connected repository</option>${repoOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+        gscSel.innerHTML = `<option value="">Any connected GSC property</option>${gscOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+        bingSel.innerHTML = `<option value="">Any connected Bing property</option>${bingOptions.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('')}`;
+
+        repoSel.value = wizardData.data_scope?.github_repo || '';
+        gscSel.value = wizardData.data_scope?.gsc_site || '';
+        bingSel.value = wizardData.data_scope?.bing_site || '';
+
+        if (loadingEl) {
+          loadingEl.innerHTML = `
+            <div class="text-sm">
+              <strong>Available sources:</strong>
+              ${repoOptions.length} repos · ${gscOptions.length} GSC properties · ${bingOptions.length} Bing properties
+            </div>
+          `;
+        }
+      } catch (err) {
+        const loadingEl = document.getElementById('wizard-scope-loading');
+        if (loadingEl) loadingEl.textContent = `Could not load source options: ${err.message}`;
+      }
+    })();
   }
 
   function showApiKeyModal(serviceId, serviceName, fields) {
@@ -2590,6 +2721,14 @@
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Schedule</div>
             <div class="text-sm font-medium" style="text-transform:capitalize">${wizardData.schedule}</div>
           </div>
+          <div>
+            <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Data Scope</div>
+            <div class="text-sm">
+              <div>Repo: <strong>${escapeHtml(wizardData.data_scope?.github_repo || 'Any connected')}</strong></div>
+              <div>GSC: <strong>${escapeHtml(wizardData.data_scope?.gsc_site || 'Any connected')}</strong></div>
+              <div>Bing: <strong>${escapeHtml(wizardData.data_scope?.bing_site || 'Any connected')}</strong></div>
+            </div>
+          </div>
           ${wizardData.rules.length > 0 ? `
           <div>
             <div class="text-xs text-muted" style="text-transform:uppercase;letter-spacing:0.04em;margin-bottom:4px">Rules</div>
@@ -2616,7 +2755,11 @@
         wizardData.goals = checked;
         break;
       case 3:
-        // Connections are optional, just continue
+        wizardData.data_scope = {
+          github_repo: document.getElementById('wizard-scope-repo')?.value || '',
+          gsc_site: document.getElementById('wizard-scope-gsc')?.value || '',
+          bing_site: document.getElementById('wizard-scope-bing')?.value || '',
+        };
         break;
       case 4:
         wizardData.model = document.getElementById('wizard-model')?.value || 'gpt-4o-mini';
@@ -2649,6 +2792,7 @@
               goals: wizardData.goals,
               schedule: wizardData.schedule,
               rules: wizardData.rules,
+              data_scope: wizardData.data_scope,
             }),
           });
           // Success animation
@@ -2666,7 +2810,7 @@
           toast('Agent deployed successfully!', 'success');
           // Reset wizard state
           wizardStep = 0;
-          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
           return;
         } catch (err) {
           toast(err.message, 'error');
@@ -2696,7 +2840,7 @@
         <div class="grid-3">
           ${templates.map(t => `
             <div class="template-card" data-id="${t.id}">
-              <div class="template-card-icon">${t.icon}</div>
+              <div class="template-card-icon"><i data-lucide="${t.icon}" style="width:24px;height:24px"></i></div>
               <div class="template-card-name">${escapeHtml(t.name)}</div>
               <div class="template-card-desc">${escapeHtml(t.description)}</div>
               <div class="template-card-tags" style="margin-bottom:12px">
@@ -2712,7 +2856,7 @@
       document.querySelectorAll('.use-template-btn').forEach(btn => {
         btn.addEventListener('click', () => {
           wizardStep = 0;
-          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+          wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
           wizardData.template_id = btn.dataset.id;
           wizardData.templateObj = templates.find(t => t.id === btn.dataset.id);
           if (wizardData.templateObj) {
@@ -2941,7 +3085,7 @@
     }
   }
 
-  // ── BILLING VIEW ─────────────────────────
+  // ── BILLING VIEW ───────────────────────────
   async function renderBilling(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -3087,7 +3231,7 @@
     }
   }
 
-  // ── SETTINGS VIEW ──────────────────────
+  // ── SETTINGS VIEW ──────────────────────────
   async function renderSettings(container) {
     container.innerHTML = `<div class="loading-center"><div class="loading-spinner"></div></div>`;
     try {
@@ -3197,7 +3341,7 @@
     backdrop?.classList.toggle('open', sidebarOpen);
   }
 
-  // ── INIT ─────────────────────────────────────
+  // ── INIT ───────────────────────────────────
   async function init() {
     // 1. Load config from backend
     try {
@@ -3260,12 +3404,12 @@
     render,
     resetWizard: () => {
       wizardStep = 0;
-      wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [] };
+      wizardData = { template_id: null, templateObj: null, name: '', description: '', goals: [], connections: [], model: 'gpt-4o-mini', temperature: 0.7, max_tokens: 1024, schedule: 'daily', rules: [], data_scope: { github_repo: '', gsc_site: '', bing_site: '' } };
       navigate('#/wizard');
     },
   };
 
-  // ── BOOT ─────────────────────────────────────
+  // ── BOOT ───────────────────────────────────
   init();
 
 })();
