@@ -2463,9 +2463,20 @@
   }
 
   function renderWizardConnect(el) {
+    const wizardServices = [
+      { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>', auth: 'oauth' },
+      { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>', auth: 'oauth' },
+      { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '<i data-lucide="globe" style="width:20px;height:20px;color:#00809d"></i>', auth: 'oauth' },
+      { id: 'github', name: 'GitHub', icon: '<i data-lucide="github" style="width:20px;height:20px;color:#24292f"></i>', auth: 'oauth' },
+      { id: 'twitter', name: 'X (Twitter)', icon: '<i data-lucide="at-sign" style="width:20px;height:20px;color:#1d9bf0"></i>', auth: 'oauth' },
+      { id: 'tiktok', name: 'TikTok', icon: '<i data-lucide="music" style="width:20px;height:20px;color:#25f4ee"></i>', auth: 'oauth' },
+      { id: 'google_gemini', name: 'Google Gemini', icon: '<i data-lucide="sparkles" style="width:20px;height:20px;color:#4285f4"></i>', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'Your Gemini API key'}] },
+    ];
+
     el.innerHTML = `
       <h2 class="wizard-step-title">Connect Services</h2>
-      <p class="text-sm text-muted mb-4">Optional: connect external services your agent can use.</p>
+      <p class="text-sm text-muted mb-4">Optional: connect services your agent can use. OAuth services open your existing OAuth flow.</p>
+      <div class="grid-2" id="wizard-connect-grid" style="margin-bottom:16px"></div>
       <div class="card" style="max-width:760px;margin-bottom:16px">
         <div class="form-group">
           <label class="form-label">Scoped GitHub Repository</label>
@@ -2490,6 +2501,55 @@
       <div class="card" style="max-width:760px">
         <div class="text-sm text-muted" id="wizard-scope-loading">Loading selectable data sources...</div>
       </div>`;
+
+    (async () => {
+      try {
+        const connections = await apiFetch('/api/connections');
+        const connectedMap = {};
+        (connections || []).forEach(c => { connectedMap[c.service] = c; });
+
+        const grid = document.getElementById('wizard-connect-grid');
+        if (!grid) return;
+        grid.innerHTML = wizardServices.map(s => {
+          const conn = connectedMap[s.id];
+          const isConnected = !!conn && conn.is_active;
+          return `
+            <div class="connection-card ${isConnected ? 'connection-card-connected' : ''}">
+              <div class="connection-icon">${s.icon}</div>
+              <div class="connection-info">
+                <div class="connection-name">${s.name}</div>
+                <div class="connection-status">
+                  <span class="connection-status-dot ${isConnected ? 'connected' : ''}"></span>
+                  <span>${isConnected ? 'Connected' : 'Not connected'}</span>
+                </div>
+              </div>
+              <button class="btn ${isConnected ? 'btn-secondary' : 'btn-primary'} btn-sm wizard-connect-btn"
+                data-service="${s.id}" data-name="${s.name}" data-auth="${s.auth}" data-fields='${s.fields ? JSON.stringify(s.fields) : ""}'>
+                ${isConnected ? 'Reconnect' : 'Connect'}
+              </button>
+            </div>
+          `;
+        }).join('');
+
+        grid.querySelectorAll('.wizard-connect-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            const auth = btn.dataset.auth;
+            const service = btn.dataset.service;
+            const name = btn.dataset.name;
+            if (auth === 'oauth') {
+              startOAuthFlow(service, name);
+            } else {
+              const fields = btn.dataset.fields ? JSON.parse(btn.dataset.fields) : [{key: 'api_key', label: 'API Key', placeholder: 'Enter your API key'}];
+              showApiKeyModal(service, name, fields);
+            }
+          });
+        });
+
+        lucide.createIcons({ nodes: [grid] });
+      } catch (err) {
+        // non-blocking
+      }
+    })();
 
     (async () => {
       try {
@@ -2883,7 +2943,7 @@
         services: [
           { id: 'google_search_console', name: 'Google Search Console', icon: '<i data-lucide="search" style="width:20px;height:20px;color:#4285f4"></i>', desc: 'Search performance, keywords, indexing status', auth: 'oauth' },
           { id: 'google_analytics', name: 'Google Analytics', icon: '<i data-lucide="bar-chart-3" style="width:20px;height:20px;color:#e37400"></i>', desc: 'Traffic, user behavior, conversions', auth: 'oauth' },
-          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '<i data-lucide="globe" style="width:20px;height:20px;color:#00809d"></i>', desc: 'Bing search data, crawl stats, SEO issues', auth: 'apikey', fields: [{key: 'api_key', label: 'API Key', placeholder: 'From Bing Webmaster → Settings → API Access'}] },
+          { id: 'bing_webmaster', name: 'Bing Webmaster Tools', icon: '<i data-lucide="globe" style="width:20px;height:20px;color:#00809d"></i>', desc: 'Bing search data, crawl stats, SEO issues', auth: 'oauth' },
           { id: 'microsoft_clarity', name: 'Microsoft Clarity', icon: '<i data-lucide="flame" style="width:20px;height:20px;color:#ff6f00"></i>', desc: 'Heatmaps, session recordings, user insights', auth: 'oauth' },
           { id: 'cloudflare', name: 'Cloudflare', icon: '<i data-lucide="cloud" style="width:20px;height:20px;color:#f38020"></i>', desc: 'DNS, caching, analytics, security', auth: 'apikey', fields: [{key: 'api_token', label: 'API Token', placeholder: 'Your Cloudflare API token'}] },
         ]
@@ -3040,7 +3100,10 @@
             window.removeEventListener('storage', storageHandler);
             toast(`${serviceName} connected successfully`, 'success');
             const main = document.getElementById('main-content');
-            if (main) renderConnections(main);
+            if (main) {
+              if ((window.location.hash || '').startsWith('#/wizard')) renderWizard(main);
+              else renderConnections(main);
+            }
           }
         };
         window.addEventListener('message', handler);
@@ -3056,7 +3119,10 @@
                 localStorage.removeItem('oauth_complete');
                 toast(`${serviceName} connected successfully`, 'success');
                 const main = document.getElementById('main-content');
-                if (main) renderConnections(main);
+                if (main) {
+                  if ((window.location.hash || '').startsWith('#/wizard')) renderWizard(main);
+                  else renderConnections(main);
+                }
               }
             } catch(e) {}
           }
@@ -3071,7 +3137,10 @@
             window.removeEventListener('storage', storageHandler);
             setTimeout(() => {
               const main = document.getElementById('main-content');
-              if (main) renderConnections(main);
+              if (main) {
+                if ((window.location.hash || '').startsWith('#/wizard')) renderWizard(main);
+                else renderConnections(main);
+              }
             }, 1000);
           }
         }, 500);
